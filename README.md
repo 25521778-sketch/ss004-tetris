@@ -17,7 +17,7 @@ GV: thầy Toàn (toannv@uit.edu.vn)
 - **Slack** `#doancuoiki`: bàn bạc, nhận thông báo tự động từ GitHub và Trello
 - **Trello**: https://trello.com/b/jlAhk1G0 – quản lý task
 - **GitHub**: repo này – quản lý code
-- **Overleaf**: https://www.overleaf.com/project/6aeec6503ea7a24e3d93a6a5 – viết báo cáo LaTeX
+- **Overleaf**: https://www.overleaf.com/project/6aef0cebf25252a5a328487e – viết báo cáo LaTeX
 
 ## Quy trình làm 1 feature
 1. **Slack** – đề xuất & bàn bạc feature trong `#doancuoiki`.
