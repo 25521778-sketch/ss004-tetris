@@ -183,9 +183,28 @@ def init_board():
                 board[i][j] = ' '
 
 
+# ==========================================
+# GIAO DIỆN VIỀN & GẠCH VUÔNG VỨC (JD 04)
+# Ký tự trong console cao gần gấp đôi chiều rộng, nên mỗi ô của
+# bàn chơi được vẽ bằng 2 ký tự để trông vuông. Ma trận board
+# không đổi, chỉ thay cách hiển thị.
+# ==========================================
+CELL_BLOCK = '██'   # 1 ô gạch = 2 ký tự khối đặc
+CELL_EMPTY = '  '   # 1 ô trống = 2 dấu cách
+
+def render_row(i):
+    """Chuyển hàng i của ma trận board thành chuỗi hiển thị."""
+    if i == 0:
+        return '╔' + '══' * (W - 2) + '╗'
+    if i == H - 1:
+        return '╚' + '══' * (W - 2) + '╝'
+    cells = ''.join(CELL_EMPTY if board[i][j] == ' ' else CELL_BLOCK
+                    for j in range(1, W - 1))
+    return '║' + cells + '║'
+
 def draw():
     # Đưa con trỏ về góc (1,1) và in đè toàn bộ khung hình trong 1 lần syscall
-    frame = "\033[H" + "\n".join("".join(row) for row in board)
+    frame = "\033[H" + "\n".join(render_row(i) for i in range(H))
     sys.stdout.write(frame + "\n")
     sys.stdout.flush()
 
@@ -202,6 +221,9 @@ def main():
 
     # Kích hoạt VT100/ANSI trên Windows Console, ẩn con trỏ và xóa màn hình 1 lần duy nhất
     os.system('')
+    # In được ký tự khung (╔═║) và khối (█) trên console Windows
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8')
     sys.stdout.write('\033[?25l')
     os.system('cls')
 
