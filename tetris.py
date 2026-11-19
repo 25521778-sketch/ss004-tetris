@@ -14,7 +14,7 @@ H = 20
 W = 15
 
 # Khởi tạo ma trận bàn chơi
-board = [[' ' for _ in range(W)] for _ in range(H)]
+board = [[" " for _ in range(W)] for _ in range(H)]
 
 
 # ==========================================
@@ -31,12 +31,12 @@ class Block:
         size = len(matrix)
         for i in range(size):
             for j in range(size):
-                if matrix[i][j] != ' ':
+                if matrix[i][j] != " ":
                     xt = self.x + j + dx
                     yt = self.y + i + dy
                     if xt < 1 or xt >= W - 1 or yt >= H - 1:
                         return False
-                    if board[yt][xt] != ' ':
+                    if board[yt][xt] != " ":
                         return False
         return True
 
@@ -44,20 +44,20 @@ class Block:
         size = len(self.shape)
         for i in range(size):
             for j in range(size):
-                if self.shape[i][j] != ' ':
+                if self.shape[i][j] != " ":
                     board[self.y + i][self.x + j] = self.shape[i][j]
 
     def del_from_board(self):
         size = len(self.shape)
         for i in range(size):
             for j in range(size):
-                if self.shape[i][j] != ' ':
-                    board[self.y + i][self.x + j] = ' '
+                if self.shape[i][j] != " ":
+                    board[self.y + i][self.x + j] = " "
 
     def rotate(self):
         """Phương thức xoay mặc định 90 độ theo chiều kim đồng hồ"""
         size = len(self.shape)
-        rotated = [[' ' for _ in range(size)] for _ in range(size)]
+        rotated = [[" " for _ in range(size)] for _ in range(size)]
         for i in range(size):
             for j in range(size):
                 rotated[j][size - 1 - i] = self.shape[i][j]
@@ -73,10 +73,10 @@ class BlockO(Block):
     def __init__(self, x=5, y=0):
         super().__init__(x, y)
         self.shape = [
-            [' ', ' ', ' ', ' '],
-            [' ', 'O', 'O', ' '],
-            [' ', 'O', 'O', ' '],
-            [' ', ' ', ' ', ' ']
+            [" ", " ", " ", " "],
+            [" ", "O", "O", " "],
+            [" ", "O", "O", " "],
+            [" ", " ", " ", " "],
         ]
 
     def rotate(self):
@@ -88,26 +88,26 @@ class BlockI(Block):
         super().__init__(x, y)
         self.is_vertical = True
         self.shape = [
-            [' ', 'I', ' ', ' '],
-            [' ', 'I', ' ', ' '],
-            [' ', 'I', ' ', ' '],
-            [' ', 'I', ' ', ' ']
+            [" ", "I", " ", " "],
+            [" ", "I", " ", " "],
+            [" ", "I", " ", " "],
+            [" ", "I", " ", " "],
         ]
 
     def rotate(self):
         if self.is_vertical:
             rotated = [
-                [' ', ' ', ' ', ' '],
-                ['I', 'I', 'I', 'I'],
-                [' ', ' ', ' ', ' '],
-                [' ', ' ', ' ', ' ']
+                [" ", " ", " ", " "],
+                ["I", "I", "I", "I"],
+                [" ", " ", " ", " "],
+                [" ", " ", " ", " "],
             ]
         else:
             rotated = [
-                [' ', 'I', ' ', ' '],
-                [' ', 'I', ' ', ' '],
-                [' ', 'I', ' ', ' '],
-                [' ', 'I', ' ', ' ']
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
             ]
 
         if self.can_move(0, 0, rotated):
@@ -118,51 +118,31 @@ class BlockI(Block):
 class BlockT(Block):
     def __init__(self, x=5, y=0):
         super().__init__(x, y)
-        self.shape = [
-            [' ', 'T', ' '],
-            ['T', 'T', 'T'],
-            [' ', ' ', ' ']
-        ]
+        self.shape = [[" ", "T", " "], ["T", "T", "T"], [" ", " ", " "]]
 
 
 class BlockS(Block):
     def __init__(self, x=5, y=0):
         super().__init__(x, y)
-        self.shape = [
-            [' ', 'S', 'S'],
-            ['S', 'S', ' '],
-            [' ', ' ', ' ']
-        ]
+        self.shape = [[" ", "S", "S"], ["S", "S", " "], [" ", " ", " "]]
 
 
 class BlockZ(Block):
     def __init__(self, x=5, y=0):
         super().__init__(x, y)
-        self.shape = [
-            ['Z', 'Z', ' '],
-            [' ', 'Z', 'Z'],
-            [' ', ' ', ' ']
-        ]
+        self.shape = [["Z", "Z", " "], [" ", "Z", "Z"], [" ", " ", " "]]
 
 
 class BlockJ(Block):
     def __init__(self, x=5, y=0):
         super().__init__(x, y)
-        self.shape = [
-            ['J', ' ', ' '],
-            ['J', 'J', 'J'],
-            [' ', ' ', ' ']
-        ]
+        self.shape = [["J", " ", " "], ["J", "J", "J"], [" ", " ", " "]]
 
 
 class BlockL(Block):
     def __init__(self, x=5, y=0):
         super().__init__(x, y)
-        self.shape = [
-            [' ', ' ', 'L'],
-            ['L', 'L', 'L'],
-            [' ', ' ', ' ']
-        ]
+        self.shape = [[" ", " ", "L"], ["L", "L", "L"], [" ", " ", " "]]
 
 
 def spawn_block():
@@ -178,9 +158,9 @@ def init_board():
     for i in range(H):
         for j in range(W):
             if i == 0 or i == H - 1 or j == 0 or j == W - 1:
-                board[i][j] = '#'
+                board[i][j] = "#"
             else:
-                board[i][j] = ' '
+                board[i][j] = " "
 
 
 def draw():
@@ -192,7 +172,14 @@ def draw():
 
 def remove_line():
     # TODO (JD 02): Viết logic kiểm tra hàng đầy, xóa hàng và dồn gạch phía trên xuống
-    pass
+    i = H - 2
+    while i >= 1:
+        if " " not in board[i][1 : W - 1]:
+            for k in range(i, 1, -1):
+                board[k][1 : W - 1] = board[k - 1][1 : W - 1]
+            board[1][1 : W - 1] = [" "] * (W - 2)
+        else:
+            i -= 1
 
 
 def main():
@@ -201,9 +188,9 @@ def main():
     init_board()
 
     # Kích hoạt VT100/ANSI trên Windows Console, ẩn con trỏ và xóa màn hình 1 lần duy nhất
-    os.system('')
-    sys.stdout.write('\033[?25l')
-    os.system('cls')
+    os.system("")
+    sys.stdout.write("\033[?25l")
+    os.system("cls")
 
     try:
         while True:
@@ -213,19 +200,19 @@ def main():
             if msvcrt.kbhit():
                 c = msvcrt.getch()
                 try:
-                    c = c.decode('utf-8').lower()
+                    c = c.decode("utf-8").lower()
                 except Exception:
-                    c = ''
+                    c = ""
 
-                if c == 'a' and current_block.can_move(-1, 0):
+                if c == "a" and current_block.can_move(-1, 0):
                     current_block.x -= 1
-                elif c == 'd' and current_block.can_move(1, 0):
+                elif c == "d" and current_block.can_move(1, 0):
                     current_block.x += 1
-                elif c == 'x' and current_block.can_move(0, 1):
+                elif c == "x" and current_block.can_move(0, 1):
                     current_block.y += 1
-                elif c == 'w':
+                elif c == "w":
                     current_block.rotate()
-                elif c == 'q':
+                elif c == "q":
                     break
 
             # Tự động rơi xuống
@@ -241,7 +228,7 @@ def main():
             time.sleep(0.5)
     finally:
         # Khôi phục lại con trỏ terminal khi thoát game (kể cả khi bấm Ctrl+C)
-        sys.stdout.write('\033[?25h')
+        sys.stdout.write("\033[?25h")
         sys.stdout.flush()
 
 
