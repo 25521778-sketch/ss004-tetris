@@ -171,15 +171,21 @@ def draw():
 
 
 def remove_line():
-    # TODO (JD 02): Viết logic kiểm tra hàng đầy, xóa hàng và dồn gạch phía trên xuống
-    i = H - 2
-    while i >= 1:
-        if " " not in board[i][1 : W - 1]:
-            for k in range(i, 1, -1):
-                board[k][1 : W - 1] = board[k - 1][1 : W - 1]
+    # duyệt từ hàng đáy của vùng chơi lên hàng trên cùng
+    # H: chiều cao của board, W: chiều rộng của board
+    current_row = H - 2
+    while current_row >= 1:
+        # Cắt bỏ 2 cột viền hai bên để lấy các ô trong vùng chơi
+        playable_cells = board[current_row][1 : W - 1]
+        if " " not in playable_cells:
+            # dồn toàn bộ các hàng phía trên xuống một bậc
+            for target_row in range(current_row, 1, -1):
+                above_row = target_row - 1
+                board[target_row][1 : W - 1] = board[above_row][1 : W - 1]
+            # làm trống hàng trên cùng của vùng chơi sau khi dồn
             board[1][1 : W - 1] = [" "] * (W - 2)
         else:
-            i -= 1
+            current_row -= 1
 
 
 def main():
