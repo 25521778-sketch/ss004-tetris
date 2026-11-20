@@ -197,18 +197,25 @@ def draw():
 
 
 def remove_line():
-  """Kiểm tra hàng đầy, xóa hàng, dồn gạch phía trên xuống và trả về số hàng đã xóa"""
-  lines_cleared = 0
-  i = H - 2
-  while i >= 1:
-    if " " not in board[i][1 : W - 1]:
-      lines_cleared += 1
-      for k in range(i, 1, -1):
-        board[k][1 : W - 1] = board[k - 1][1 : W - 1]
-      board[1][1 : W - 1] = [" "] * (W - 2)
-    else:
-      i -= 1
-  return lines_cleared
+"""Kiểm tra hàng đầy, xóa hàng, dồn gạch phía trên xuống và trả về số hàng đã xóa"""
+    lines_cleared = 0
+    # duyệt từ hàng đáy của vùng chơi lên hàng trên cùng
+    # H: chiều cao của board, W: chiều rộng của board
+    current_row = H - 2
+    while current_row >= 1:
+        # Cắt bỏ 2 cột viền hai bên để lấy các ô trong vùng chơi
+        playable_cells = board[current_row][1 : W - 1]
+        if " " not in playable_cells:
+            lines_cleared += 1
+            # dồn toàn bộ các hàng phía trên xuống một bậc
+            for target_row in range(current_row, 1, -1):
+                above_row = target_row - 1
+                board[target_row][1 : W - 1] = board[above_row][1 : W - 1]
+            # làm trống hàng trên cùng của vùng chơi sau khi dồn
+            board[1][1 : W - 1] = [" "] * (W - 2)
+        else:
+            current_row -= 1
+    return lines_cleared
 
 
 def main():
