@@ -26,7 +26,7 @@ DIFFICULTIES = (
     ("NORMAL", 0.50),
     ("HARD", 0.20),
 )
-FRAME_DELAY = 0.016  # Kiểm tra phím khoảng 60 lần/giây, độc lập với tốc độ rơi.
+FRAME_DELAY = 0.016  # Kiểm tra phím k hoảng 60 lần/giây, độc lập với tốc độ rơi.
 
 
 class Block:
