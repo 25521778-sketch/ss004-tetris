@@ -2,6 +2,7 @@ import os
 import time
 import random
 import sys
+sys.stdout.reconfigure(encoding='utf-8')
 
 # Yêu cầu chạy trên Windows Terminal do dùng msvcrt giả lập conio.h
 try:
