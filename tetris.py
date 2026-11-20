@@ -190,11 +190,10 @@ def init_board():
 # bàn chơi được vẽ bằng 2 ký tự để trông vuông. Ma trận board
 # không đổi, chỉ thay cách hiển thị.
 # ==========================================
-CELL_BLOCK = '██'   # 1 ô gạch = 2 ký tự khối đặc
-CELL_EMPTY = '  '   # 1 ô trống = 2 dấu cách
+CELL_BLOCK = '██'
+CELL_EMPTY = '  '
 
 def render_row(i):
-    """Chuyển hàng i của ma trận board thành chuỗi hiển thị."""
     if i == 0:
         return '╔' + '══' * (W - 2) + '╗'
     if i == H - 1:
@@ -204,7 +203,6 @@ def render_row(i):
     return '║' + cells + '║'
 
 def draw():
-    # Đưa con trỏ về góc (1,1) và in đè toàn bộ khung hình trong 1 lần syscall
     frame = "\033[H" + "\n".join(render_row(i) for i in range(H))
     sys.stdout.write(frame + "\n")
     sys.stdout.flush()
