@@ -2,6 +2,7 @@ import os
 import random
 import sys
 import time
+sys.stdout.reconfigure(encoding='utf-8')
 
 # Yêu cầu chạy trên Windows Terminal do dùng msvcrt giả lập conio.h
 try:
@@ -171,11 +172,28 @@ def init_board():
         board[i][j] = " "
 
 
+# ==========================================
+# GIAO DIỆN VIỀN & GẠCH VUÔNG VỨC (JD 04)
+# Ký tự trong console cao gần gấp đôi chiều rộng, nên mỗi ô của
+# bàn chơi được vẽ bằng 2 ký tự để trông vuông. Ma trận board
+# không đổi, chỉ thay cách hiển thị.
+# ==========================================
+CELL_BLOCK = '██'
+CELL_EMPTY = '  '
+
+def render_row(i):
+    if i == 0:
+        return '╔' + '══' * (W - 2) + '╗'
+    if i == H - 1:
+        return '╚' + '══' * (W - 2) + '╝'
+    cells = ''.join(CELL_EMPTY if board[i][j] == ' ' else CELL_BLOCK
+                    for j in range(1, W - 1))
+    return '║' + cells + '║'
+
 def draw():
-  # Đưa con trỏ về góc (1,1) và in đè toàn bộ khung hình trong 1 lần syscall
-  frame = "\033[H" + "\n".join("".join(row) for row in board)
-  sys.stdout.write(frame + "\n")
-  sys.stdout.flush()
+    frame = "\033[H" + "\n".join(render_row(i) for i in range(H))
+    sys.stdout.write(frame + "\n")
+    sys.stdout.flush()
 
 
 def remove_line():
@@ -194,7 +212,7 @@ def remove_line():
 
 
 def main():
-  random.seed()
+random.seed()
   current_block = spawn_block()
   init_board()
 
@@ -203,6 +221,8 @@ def main():
   last_fall_time = time.time()
 
   os.system('')
+  if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
   sys.stdout.write('\033[?25l')
   os.system('cls')
 
@@ -231,13 +251,13 @@ def main():
           needs_redraw = True
         elif c == 'x' and current_block.can_move(0, 1):
           current_block.y += 1
-          last_fall_time = time.time()  # Đặt lại nhịp rơi khi chủ động nhấn xuống
+          last_fall_time = time.time()
           needs_redraw = True
         elif c == 'w':
           current_block.rotate()
           needs_redraw = True
         elif c == 'q':
-          return  # Thoát game (vẫn chạy khối finally bên dưới)
+          return
 
       # 2. Chỉ cho gạch tự rơi khi đã trôi qua đủ khoảng thời gian fall_delay
       now = time.time()
@@ -252,6 +272,7 @@ def main():
           cleared = remove_line()
           if cleared > 0:
             fall_delay = max(min_delay, fall_delay * (0.9**cleared))
+
 
           current_block = spawn_block()
           if not current_block.can_move(0, 1):
