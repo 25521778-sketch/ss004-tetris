@@ -388,8 +388,6 @@ def play_game(difficulty, base_fall_delay):
                         read_key()
                         return
 
-          current_block = spawn_block()
-          if not current_block.can_move(0, 1):
             current_block.to_board()
             if needs_redraw:
                 draw(total_lines, fall_delay, difficulty)
