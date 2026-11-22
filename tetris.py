@@ -2,26 +2,35 @@ import os
 import random
 import sys
 import time
+
 sys.stdout.reconfigure(encoding='utf-8')
 
 # Trò chơi sử dụng msvcrt để đọc bàn phím không cần nhấn Enter trên Windows.
 try:
-  import msvcrt
+    import msvcrt
 except ImportError:
-  print("Mã nguồn này yêu cầu Windows để chạy thư viện msvcrt.")
-  sys.exit()
+    print("Mã nguồn này yêu cầu Windows để chạy thư viện msvcrt.")
+    sys.exit()
 
 H = 20
 W = 15
 board = [[" " for _ in range(W)] for _ in range(H)]
 
-# JD05: Tốc độ rơi ban đầu ứng với từng độ khó (giây / ô).
+# JD05: (Tên độ khó, tốc độ rơi giây/ô, hệ số nhân điểm)
 DIFFICULTIES = [
-    ("EASY", 0.8),
-    ("NORMAL", 0.5),
-    ("HARD", 0.2),
+    ("EASY", 0.8, 1),
+    ("NORMAL", 0.5, 2),
+    ("HARD", 0.2, 3),
 ]
 MIN_FALL_DELAY = 0.08  # JD03: Không để tốc độ rơi tăng vô hạn.
+
+# Bảng điểm cơ bản khi xóa 1, 2, 3 hoặc 4 hàng cùng lúc.
+LINE_SCORES = {
+    1: 100,
+    2: 300,
+    3: 500,
+    4: 800,
+}
 
 
 # ==========================================
@@ -29,67 +38,68 @@ MIN_FALL_DELAY = 0.08  # JD03: Không để tốc độ rơi tăng vô hạn.
 # ==========================================
 class Block:
 
-  def __init__(self, x=5, y=1):
-    self.x = x
-    self.y = y
-    self.shape = []
+    def __init__(self, x=5, y=1):
+        self.x = x
+        self.y = y
+        self.shape = []
 
-  def can_move(self, dx, dy, target_shape=None):
-    matrix = target_shape if target_shape is not None else self.shape
-    size = len(matrix)
-    for i in range(size):
-      for j in range(size):
-        if matrix[i][j] != " ":
-          xt = self.x + j + dx
-          yt = self.y + i + dy
-          if xt < 1 or xt >= W - 1 or yt >= H - 1:
-            return False
-          if board[yt][xt] != " ":
-            return False
-    return True
+    def can_move(self, dx, dy, target_shape=None):
+        matrix = target_shape if target_shape is not None else self.shape
+        size = len(matrix)
+        for i in range(size):
+            for j in range(size):
+                if matrix[i][j] != " ":
+                    xt = self.x + j + dx
+                    yt = self.y + i + dy
+                    if xt < 1 or xt >= W - 1 or yt >= H - 1:
+                        return False
+                    if board[yt][xt] != " ":
+                        return False
+        return True
 
-  def to_board(self):
-    size = len(self.shape)
-    for i in range(size):
-      for j in range(size):
-        if self.shape[i][j] != " ":
-          board[self.y + i][self.x + j] = self.shape[i][j]
+    def to_board(self):
+        size = len(self.shape)
+        for i in range(size):
+            for j in range(size):
+                if self.shape[i][j] != " ":
+                    board[self.y + i][self.x + j] = self.shape[i][j]
 
-  def del_from_board(self):
-    size = len(self.shape)
-    for i in range(size):
-      for j in range(size):
-        if self.shape[i][j] != " ":
-          board[self.y + i][self.x + j] = " "
+    def del_from_board(self):
+        size = len(self.shape)
+        for i in range(size):
+            for j in range(size):
+                if self.shape[i][j] != " ":
+                    board[self.y + i][self.x + j] = " "
 
-  def rotate(self):
-    """Phương thức xoay mặc định 90 độ theo chiều kim đồng hồ"""
-    size = len(self.shape)
-    rotated = [[" " for _ in range(size)] for _ in range(size)]
-    for i in range(size):
-      for j in range(size):
-        rotated[j][size - 1 - i] = self.shape[i][j]
+    def rotate(self):
+        """Phương thức xoay mặc định 90 độ theo chiều kim đồng hồ"""
+        size = len(self.shape)
+        rotated = [[" " for _ in range(size)] for _ in range(size)]
+        for i in range(size):
+            for j in range(size):
+                rotated[j][size - 1 - i] = self.shape[i][j]
 
-    if self.can_move(0, 0, rotated):
-      self.shape = rotated
+        if self.can_move(0, 0, rotated):
+            self.shape = rotated
 
 
 class BlockO(Block):
 
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [
-        [" ", " ", " ", " "],
-        [" ", "O", "O", " "],
-        [" ", "O", "O", " "],
-        [" ", " ", " ", " "],
-    ]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y)
+        self.shape = [
+            [" ", " ", " ", " "],
+            [" ", "O", "O", " "],
+            [" ", "O", "O", " "],
+            [" ", " ", " ", " "],
+        ]
 
-  def rotate(self):
-    pass
+    def rotate(self):
+        pass
 
 
 class BlockI(Block):
+
     def __init__(self, x=5, y=1):
         super().__init__(x, y)
         self.is_vertical = True
@@ -127,43 +137,43 @@ class BlockI(Block):
 
 class BlockT(Block):
 
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [[" ", "T", " "], ["T", "T", "T"], [" ", " ", " "]]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y)
+        self.shape = [[" ", "T", " "], ["T", "T", "T"], [" ", " ", " "]]
 
 
 class BlockS(Block):
 
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [[" ", "S", "S"], ["S", "S", " "], [" ", " ", " "]]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y)
+        self.shape = [[" ", "S", "S"], ["S", "S", " "], [" ", " ", " "]]
 
 
 class BlockZ(Block):
 
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [["Z", "Z", " "], [" ", "Z", "Z"], [" ", " ", " "]]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y)
+        self.shape = [["Z", "Z", " "], [" ", "Z", "Z"], [" ", " ", " "]]
 
 
 class BlockJ(Block):
 
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [["J", " ", " "], ["J", "J", "J"], [" ", " ", " "]]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y)
+        self.shape = [["J", " ", " "], ["J", "J", "J"], [" ", " ", " "]]
 
 
 class BlockL(Block):
 
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [[" ", " ", "L"], ["L", "L", "L"], [" ", " ", " "]]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y)
+        self.shape = [[" ", " ", "L"], ["L", "L", "L"], [" ", " ", " "]]
 
 
 def spawn_block():
-  block_classes = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
-  chosen_class = random.choice(block_classes)
-  return chosen_class(x=5, y=1)
+    block_classes = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
+    chosen_class = random.choice(block_classes)
+    return chosen_class(x=5, y=1)
 
 
 # ==========================================
@@ -197,8 +207,8 @@ def render_row(i):
     return "║" + cells + "║"
 
 
-def render_next_row(i, next_block):
-    """Vẽ khung xem trước khối tiếp theo ở bên phải bàn chơi."""
+def render_side_row(i, next_block, score):
+    """Vẽ khung xem trước khối tiếp theo và bảng điểm ở bên phải bàn chơi."""
     if i == 0:
         return "  NEXT:"
     if i == 1:
@@ -221,12 +231,20 @@ def render_next_row(i, next_block):
         return "  ║" + "".join(cells) + "║"
     if i == 6:
         return "  ╚════════╝"
+    if i == 8:
+        return "  SCORE:"
+    if i == 9:
+        return "  ╔════════╗"
+    if i == 10:
+        return f"  ║{str(score).center(8)}║"
+    if i == 11:
+        return "  ╚════════╝"
     return ""
 
 
-def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", next_block=None):
+def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", next_block=None, score=0):
     # \033[K xóa phần chữ thừa bên phải trên từng dòng; \033[J xóa phần thừa bên dưới.
-    rows = [render_row(i) + render_next_row(i, next_block) for i in range(H)]
+    rows = [render_row(i) + render_side_row(i, next_block, score) for i in range(H)]
     rows.extend([
         f"Độ khó: {difficulty} | Hàng đã xóa: {total_lines} | Tốc độ: {fall_delay:.2f}s/ô",
         "A/D hoặc ←/→: di chuyển | W hoặc ↑: xoay",
@@ -295,12 +313,12 @@ def clear_screen():
 # JD05: MENU PLAY / DIFFICULTY / EXIT
 # ==========================================
 def show_menu():
-    """Trả về (tên độ khó, tốc độ rơi), hoặc None nếu chọn thoát."""
+    """Trả về (tên độ khó, tốc độ rơi, hệ số điểm), hoặc None nếu chọn thoát."""
     difficulty_index = 1  # Chọn NORMAL làm mặc định.
     selected_index = 0     # Trỏ vào PLAY khi mở menu.
 
     while True:
-        difficulty_name, fall_delay = DIFFICULTIES[difficulty_index]
+        difficulty_name, fall_delay, _ = DIFFICULTIES[difficulty_index]
         options = ["PLAY", f"DIFFICULTY: {difficulty_name}", "EXIT"]
         lines = [
             "╔════════════════════════════════════╗",
@@ -348,12 +366,13 @@ def show_menu():
 # ==========================================
 # JD05: VÒNG LẶP GAME VÀ ĐIỀU KHIỂN
 # ==========================================
-def play_game(difficulty, base_fall_delay):
+def play_game(difficulty, base_fall_delay, score_multiplier):
     init_board()
     current_block = spawn_block()
     next_block = spawn_block()
     fall_delay = base_fall_delay
     total_lines = 0
+    score = 0
     last_fall_time = time.monotonic()
 
     clear_screen()
@@ -363,13 +382,13 @@ def play_game(difficulty, base_fall_delay):
     try:
         if not current_block.can_move(0, 0):
             # Trường hợp không còn chỗ đặt khối đầu tiên.
-            draw(total_lines, fall_delay, difficulty, next_block)
-            print("\nGAME OVER! Nhấn phím bất kỳ để về menu.", flush=True)
+            draw(total_lines, fall_delay, difficulty, next_block, score)
+            print(f"\nGAME OVER! Điểm đạt được: {score} | Nhấn phím bất kỳ để về menu.", flush=True)
             read_key()
             return
 
         current_block.to_board()
-        draw(total_lines, fall_delay, difficulty, next_block)
+        draw(total_lines, fall_delay, difficulty, next_block, score)
 
         while True:
             needs_redraw = False
@@ -387,12 +406,16 @@ def play_game(difficulty, base_fall_delay):
                     needs_redraw = True
                 elif key in ("s", "x", "down") and current_block.can_move(0, 1):
                     current_block.y += 1
+                    score += 1  # Thưởng 1 điểm cho mỗi ô rơi nhanh chủ động.
                     last_fall_time = time.monotonic()
                     needs_redraw = True
                 elif key == "space":
                     # Đưa khối rơi thẳng xuống vị trí thấp nhất và khóa ngay lập tức.
+                    dropped_rows = 0
                     while current_block.can_move(0, 1):
                         current_block.y += 1
+                        dropped_rows += 1
+                    score += dropped_rows * 2  # Thưởng 2 điểm cho mỗi ô hard drop.
                     hard_dropped = True
                     needs_redraw = True
                     break
@@ -414,8 +437,9 @@ def play_game(difficulty, base_fall_delay):
                     cleared = remove_line()
                     total_lines += cleared
 
-                    # JD03: Càng xóa nhiều hàng, gạch rơi càng nhanh.
+                    # JD03: Cộng điểm và tăng tốc độ rơi khi xóa được hàng.
                     if cleared > 0:
+                        score += LINE_SCORES.get(cleared, cleared * 200) * score_multiplier
                         fall_delay = max(
                             MIN_FALL_DELAY,
                             fall_delay * (0.9 ** cleared),
@@ -425,14 +449,14 @@ def play_game(difficulty, base_fall_delay):
                     next_block = spawn_block()
                     # Kiểm tra ngay tại vị trí sinh khối, tránh ghi đè gạch cũ.
                     if not current_block.can_move(0, 0):
-                        draw(total_lines, fall_delay, difficulty, next_block)
-                        print("\nGAME OVER! Nhấn phím bất kỳ để về menu.", flush=True)
+                        draw(total_lines, fall_delay, difficulty, next_block, score)
+                        print(f"\nGAME OVER! Điểm đạt được: {score} | Nhấn phím bất kỳ để về menu.", flush=True)
                         read_key()
                         return
 
             current_block.to_board()
             if needs_redraw:
-                draw(total_lines, fall_delay, difficulty, next_block)
+                draw(total_lines, fall_delay, difficulty, next_block, score)
             time.sleep(0.01)
     finally:
         sys.stdout.write("\033[?25h")  # Hiện con trỏ khi rời màn chơi.
@@ -451,8 +475,8 @@ def main():
             selected = show_menu()
             if selected is None:
                 break
-            difficulty_name, base_fall_delay = selected
-            play_game(difficulty_name, base_fall_delay)
+            difficulty_name, base_fall_delay, score_multiplier = selected
+            play_game(difficulty_name, base_fall_delay, score_multiplier)
     except KeyboardInterrupt:
         pass
     finally:
