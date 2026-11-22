@@ -2,8 +2,9 @@ import os
 import random
 import sys
 import time
+sys.stdout.reconfigure(encoding='utf-8')
 
-# Yêu cầu chạy trên Windows Terminal do dùng msvcrt giả lập conio.h
+# Trò chơi sử dụng msvcrt để đọc bàn phím không cần nhấn Enter trên Windows.
 try:
   import msvcrt
 except ImportError:
@@ -12,17 +13,23 @@ except ImportError:
 
 H = 20
 W = 15
-
-# Khởi tạo ma trận bàn chơi
 board = [[" " for _ in range(W)] for _ in range(H)]
+
+# JD05: Tốc độ rơi ban đầu ứng với từng độ khó (giây / ô).
+DIFFICULTIES = [
+    ("EASY", 0.8),
+    ("NORMAL", 0.5),
+    ("HARD", 0.2),
+]
+MIN_FALL_DELAY = 0.08  # JD03: Không để tốc độ rơi tăng vô hạn.
 
 
 # ==========================================
-# LỚP CHA (BASE CLASS) ĐÓNG GÓI DỮ LIỆU KHỐI
+# JD01: LỚP CHA VÀ CÁC LỚP KHỐI KẾ THỪA
 # ==========================================
 class Block:
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     self.x = x
     self.y = y
     self.shape = []
@@ -67,12 +74,9 @@ class Block:
       self.shape = rotated
 
 
-# ==========================================
-# CÁC LỚP CON KẾ THỪA & ĐA HÌNH PHƯƠNG THỨC ROTATE
-# ==========================================
 class BlockO(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [
         [" ", " ", " ", " "],
@@ -86,69 +90,72 @@ class BlockO(Block):
 
 
 class BlockI(Block):
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y)
+        self.is_vertical = True
+        self.shape = [
+            [" ", "I", " ", " "],
+            [" ", "I", " ", " "],
+            [" ", "I", " ", " "],
+            [" ", "I", " ", " "],
+        ]
 
-  def __init__(self, x=5, y=0):
-    super().__init__(x, y)
-    self.is_vertical = True
-    self.shape = [
-        [" ", "I", " ", " "],
-        [" ", "I", " ", " "],
-        [" ", "I", " ", " "],
-        [" ", "I", " ", " "],
-    ]
+    def rotate(self):
+        if self.is_vertical:
+            rotated = [
+                [" ", " ", " ", " "],
+                ["I", "I", "I", "I"],
+                [" ", " ", " ", " "],
+                [" ", " ", " ", " "],
+            ]
+        else:
+            rotated = [
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+            ]
 
-  def rotate(self):
-    if self.is_vertical:
-      rotated = [
-          [" ", " ", " ", " "],
-          ["I", "I", "I", "I"],
-          [" ", " ", " ", " "],
-          [" ", " ", " ", " "],
-      ]
-    else:
-      rotated = [
-          [" ", "I", " ", " "],
-          [" ", "I", " ", " "],
-          [" ", "I", " ", " "],
-          [" ", "I", " ", " "],
-      ]
-
-    if self.can_move(0, 0, rotated):
-      self.shape = rotated
-      self.is_vertical = not self.is_vertical
+        # Thử xoay tại chỗ; nếu sát tường thì thử nhích trái/phải 1-2 ô (Wall Kick)
+        for dx in (0, -1, 1, -2, 2):
+            if self.can_move(dx, 0, rotated):
+                self.x += dx
+                self.shape = rotated
+                self.is_vertical = not self.is_vertical
+                break
 
 
 class BlockT(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [[" ", "T", " "], ["T", "T", "T"], [" ", " ", " "]]
 
 
 class BlockS(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [[" ", "S", "S"], ["S", "S", " "], [" ", " ", " "]]
 
 
 class BlockZ(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [["Z", "Z", " "], [" ", "Z", "Z"], [" ", " ", " "]]
 
 
 class BlockJ(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [["J", " ", " "], ["J", "J", "J"], [" ", " ", " "]]
 
 
 class BlockL(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [[" ", " ", "L"], ["L", "L", "L"], [" ", " ", " "]]
 
@@ -156,120 +163,273 @@ class BlockL(Block):
 def spawn_block():
   block_classes = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
   chosen_class = random.choice(block_classes)
-  return chosen_class(x=5, y=0)
+  return chosen_class(x=5, y=1)
 
 
 # ==========================================
-# CÁC HÀM QUẢN LÝ BÀN CHƠI & RENDER TỐI ƯU
+# JD01: KHỞI TẠO BÀN CHƠI
 # ==========================================
 def init_board():
-  for i in range(H):
-    for j in range(W):
-      if i == 0 or i == H - 1 or j == 0 or j == W - 1:
-        board[i][j] = "#"
-      else:
-        board[i][j] = " "
+    for i in range(H):
+        for j in range(W):
+            if i == 0 or i == H - 1 or j == 0 or j == W - 1:
+                board[i][j] = "#"
+            else:
+                board[i][j] = " "
 
 
-def draw():
-  # Đưa con trỏ về góc (1,1) và in đè toàn bộ khung hình trong 1 lần syscall
-  frame = "\033[H" + "\n".join("".join(row) for row in board)
-  sys.stdout.write(frame + "\n")
-  sys.stdout.flush()
+# ==========================================
+# JD04: VIỀN VÀ CÁC Ô VUÔNG VỨC
+# ==========================================
+CELL_BLOCK = "██"
+CELL_EMPTY = "  "
 
 
-def remove_line():
-  """Kiểm tra hàng đầy, xóa hàng, dồn gạch phía trên xuống và trả về số hàng đã xóa"""
-  lines_cleared = 0
-  i = H - 2
-  while i >= 1:
-    if " " not in board[i][1 : W - 1]:
-      lines_cleared += 1
-      for k in range(i, 1, -1):
-        board[k][1 : W - 1] = board[k - 1][1 : W - 1]
-      board[1][1 : W - 1] = [" "] * (W - 2)
-    else:
-      i -= 1
-  return lines_cleared
+def render_row(i):
+    if i == 0:
+        return "╔" + "══" * (W - 2) + "╗"
+    if i == H - 1:
+        return "╚" + "══" * (W - 2) + "╝"
+    cells = "".join(
+        CELL_EMPTY if board[i][j] == " " else CELL_BLOCK
+        for j in range(1, W - 1)
+    )
+    return "║" + cells + "║"
 
 
-def main():
-  random.seed()
-  current_block = spawn_block()
-  init_board()
-
-  fall_delay = 0.5  # Thời gian để gạch tự rơi 1 ô (giây)
-  min_delay = 0.08  # Giới hạn tốc độ rơi nhanh nhất
-  last_fall_time = time.time()
-
-  os.system('')
-  sys.stdout.write('\033[?25l')
-  os.system('cls')
-
-  # Vẽ khung hình ban đầu
-  current_block.to_board()
-  draw()
-
-  try:
-    while True:
-      needs_redraw = False
-      current_block.del_from_board()
-
-      # 1. Đọc toàn bộ phím bấm ngay lập tức (độ trễ chỉ ~20ms)
-      while msvcrt.kbhit():
-        c = msvcrt.getch()
-        try:
-          c = c.decode('utf-8').lower()
-        except Exception:
-          c = ''
-
-        if c == 'a' and current_block.can_move(-1, 0):
-          current_block.x -= 1
-          needs_redraw = True
-        elif c == 'd' and current_block.can_move(1, 0):
-          current_block.x += 1
-          needs_redraw = True
-        elif c == 'x' and current_block.can_move(0, 1):
-          current_block.y += 1
-          last_fall_time = time.time()  # Đặt lại nhịp rơi khi chủ động nhấn xuống
-          needs_redraw = True
-        elif c == 'w':
-          current_block.rotate()
-          needs_redraw = True
-        elif c == 'q':
-          return  # Thoát game (vẫn chạy khối finally bên dưới)
-
-      # 2. Chỉ cho gạch tự rơi khi đã trôi qua đủ khoảng thời gian fall_delay
-      now = time.time()
-      if now - last_fall_time >= fall_delay:
-        last_fall_time = now
-        needs_redraw = True
-
-        if current_block.can_move(0, 1):
-          current_block.y += 1
-        else:
-          current_block.to_board()
-          cleared = remove_line()
-          if cleared > 0:
-            fall_delay = max(min_delay, fall_delay * (0.9**cleared))
-
-          current_block = spawn_block()
-          if not current_block.can_move(0, 1):
-            current_block.to_board()
-            draw()
-            print('GAME OVER!')
-            break
-
-      current_block.to_board()
-      # Chỉ vẽ lại màn hình khi gạch thực sự di chuyểaan hoặc xoay
-      if needs_redraw:
-        draw()
-
-      time.sleep(0.01)
-  finally:
-    sys.stdout.write('\033[?25h')
+def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL"):
+    # \033[K xóa phần chữ thừa bên phải trên từng dòng; \033[J xóa phần thừa bên dưới.
+    rows = [render_row(i) for i in range(H)]
+    rows.extend([
+        f"Độ khó: {difficulty} | Hàng đã xóa: {total_lines} | Tốc độ: {fall_delay:.2f}s/ô",
+        "A/D hoặc ←/→: di chuyển | W hoặc ↑: xoay",
+        "S/X hoặc ↓: rơi nhanh | Space: rơi lập tức | Q/Esc: về menu",
+    ])
+    output = "\n".join(line + "\033[K" for line in rows)
+    sys.stdout.write("\033[3J\033[H" + output + "\033[J")
     sys.stdout.flush()
 
 
+# ==========================================
+# JD02: XÓA HÀNG ĐẦY, DỒN CÁC HÀNG BÊN TRÊN
+# ==========================================
+def remove_line():
+    """Xóa hàng đầy, dồn các hàng bên trên và trả về số hàng đã xóa."""
+    lines_cleared = 0
+    current_row = H - 2
+    while current_row >= 1:
+        playable_cells = board[current_row][1:W - 1]
+        if " " not in playable_cells:
+            lines_cleared += 1
+            for target_row in range(current_row, 1, -1):
+                above_row = target_row - 1
+                board[target_row][1:W - 1] = board[above_row][1:W - 1]
+            board[1][1:W - 1] = [" "] * (W - 2)
+            # Không giảm current_row: cần kiểm tra tiếp hàng vừa được dồn xuống.
+        else:
+            current_row -= 1
+    return lines_cleared
+
+
+# ==========================================
+# JD05: ĐỌC WASD VÀ PHÍM MŨI TÊN WINDOWS
+# ==========================================
+def read_key():
+    """Chuẩn hóa phím chữ và phím mũi tên thành một tên thống nhất."""
+    key = msvcrt.getch()
+
+    # Phím mũi tên trả về 2 byte, cần đọc byte thứ hai.
+    if key in (b"\x00", b"\xe0"):
+        second = msvcrt.getch()
+        return {
+            b"H": "up",
+            b"P": "down",
+            b"K": "left",
+            b"M": "right",
+        }.get(second, "unknown")
+    if key == b" ":
+        return "space"
+    if key == b"\r":
+        return "enter"
+    if key == b"\x1b":
+        return "esc"
+    try:
+        return key.decode("utf-8").lower()
+    except UnicodeDecodeError:
+        return "unknown"
+
+
+def clear_screen():
+    sys.stdout.write("\033[2J\033[H")
+    sys.stdout.flush()
+
+
+# ==========================================
+# JD05: MENU PLAY / DIFFICULTY / EXIT
+# ==========================================
+def show_menu():
+    """Trả về (tên độ khó, tốc độ rơi), hoặc None nếu chọn thoát."""
+    difficulty_index = 1  # Chọn NORMAL làm mặc định.
+    selected_index = 0     # Trỏ vào PLAY khi mở menu.
+
+    while True:
+        difficulty_name, fall_delay = DIFFICULTIES[difficulty_index]
+        options = ["PLAY", f"DIFFICULTY: {difficulty_name}", "EXIT"]
+        lines = [
+            "╔════════════════════════════════════╗",
+            "║              TETRIS                ║",
+            "╚════════════════════════════════════╝",
+            "",
+        ]
+        for index, option in enumerate(options):
+            cursor = "❯" if index == selected_index else " "
+            lines.append(f"  {cursor} {option}")
+        lines.extend([
+            "",
+            "W/S hoặc ↑/↓: chọn mục | Enter: xác nhận",
+            "A/D hoặc ←/→: đổi độ khó tại DIFFICULTY",
+            "Có thể bấm 1: PLAY, 2: đổi độ khó, 3: EXIT",
+        ])
+        clear_screen()
+        print("\n".join(lines), flush=True)
+
+        key = read_key()
+        if key in ("up", "w"):
+            selected_index = (selected_index - 1) % len(options)
+        elif key in ("down", "s"):
+            selected_index = (selected_index + 1) % len(options)
+        elif key in ("left", "a") and selected_index == 1:
+            difficulty_index = (difficulty_index - 1) % len(DIFFICULTIES)
+        elif key in ("right", "d") and selected_index == 1:
+            difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
+        elif key == "2":
+            selected_index = 1
+            difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
+        elif key == "1":
+            return DIFFICULTIES[difficulty_index]
+        elif key in ("3", "q", "esc"):
+            return None
+        elif key == "enter":
+            if selected_index == 0:
+                return DIFFICULTIES[difficulty_index]
+            if selected_index == 1:
+                difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
+            else:
+                return None
+
+
+# ==========================================
+# JD05: VÒNG LẶP GAME VÀ ĐIỀU KHIỂN
+# ==========================================
+def play_game(difficulty, base_fall_delay):
+    init_board()
+    current_block = spawn_block()
+    fall_delay = base_fall_delay
+    total_lines = 0
+    last_fall_time = time.monotonic()
+
+    clear_screen()
+    sys.stdout.write("\033[?25l")  # Ẩn con trỏ trong lúc chơi.
+    sys.stdout.flush()
+
+    try:
+        if not current_block.can_move(0, 0):
+            # Trường hợp không còn chỗ đặt khối đầu tiên.
+            draw(total_lines, fall_delay, difficulty)
+            print("\nGAME OVER! Nhấn phím bất kỳ để về menu.", flush=True)
+            read_key()
+            return
+
+        current_block.to_board()
+        draw(total_lines, fall_delay, difficulty)
+
+        while True:
+            needs_redraw = False
+            hard_dropped = False
+            current_block.del_from_board()
+
+            # Đọc phím thường xuyên, độc lập với đồng hồ rơi tự động.
+            while msvcrt.kbhit():
+                key = read_key()
+                if key in ("a", "left") and current_block.can_move(-1, 0):
+                    current_block.x -= 1
+                    needs_redraw = True
+                elif key in ("d", "right") and current_block.can_move(1, 0):
+                    current_block.x += 1
+                    needs_redraw = True
+                elif key in ("s", "x", "down") and current_block.can_move(0, 1):
+                    current_block.y += 1
+                    last_fall_time = time.monotonic()
+                    needs_redraw = True
+                elif key == "space":
+                    # Đưa khối rơi thẳng xuống vị trí thấp nhất và khóa ngay lập tức.
+                    while current_block.can_move(0, 1):
+                        current_block.y += 1
+                    hard_dropped = True
+                    needs_redraw = True
+                    break
+                elif key in ("w", "up"):
+                    current_block.rotate()
+                    needs_redraw = True
+                elif key in ("q", "esc"):
+                    return  # Trở về menu chính.
+
+            now = time.monotonic()
+            if hard_dropped or (now - last_fall_time >= fall_delay):
+                last_fall_time = now
+                needs_redraw = True
+                if current_block.can_move(0, 1):
+                    current_block.y += 1
+                else:
+                    # Cố định khối trước khi xóa hàng (JD02).
+                    current_block.to_board()
+                    cleared = remove_line()
+                    total_lines += cleared
+
+                    # JD03: Càng xóa nhiều hàng, gạch rơi càng nhanh.
+                    if cleared > 0:
+                        fall_delay = max(
+                            MIN_FALL_DELAY,
+                            fall_delay * (0.9 ** cleared),
+                        )
+
+                    current_block = spawn_block()
+                    # Kiểm tra ngay tại vị trí sinh khối, tránh ghi đè gạch cũ.
+                    if not current_block.can_move(0, 0):
+                        draw(total_lines, fall_delay, difficulty)
+                        print("\nGAME OVER! Nhấn phím bất kỳ để về menu.", flush=True)
+                        read_key()
+                        return
+
+            current_block.to_board()
+            if needs_redraw:
+                draw(total_lines, fall_delay, difficulty)
+            time.sleep(0.01)
+    finally:
+        sys.stdout.write("\033[?25h")  # Hiện con trỏ khi rời màn chơi.
+        sys.stdout.flush()
+
+
+def main():
+    random.seed()
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
+    # Kích hoạt khả năng xử lý mã ANSI trên Windows Console nếu được hỗ trợ.
+    os.system("")
+
+    try:
+        while True:
+            selected = show_menu()
+            if selected is None:
+                break
+            difficulty_name, base_fall_delay = selected
+            play_game(difficulty_name, base_fall_delay)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        sys.stdout.write("\033[?25h\n")
+        sys.stdout.flush()
+
+
 if __name__ == "__main__":
-  main()
+    main()
