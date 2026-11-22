@@ -1,9 +1,13 @@
+import ctypes
+from datetime import datetime
+import json
 import os
 import random
 import sys
 import time
 
-sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # Trò chơi sử dụng msvcrt để đọc bàn phím không cần nhấn Enter trên Windows.
 try:
@@ -15,6 +19,12 @@ except ImportError:
 H = 20
 W = 15
 board = [[" " for _ in range(W)] for _ in range(H)]
+last_frame_lines = []  # Bộ đệm lưu khung hình trước để vẽ vi phân chống nhấp nháy.
+
+# File lưu lịch sử Top 10 điểm cao nhất cùng thư mục với file mã nguồn.
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+HIGHSCORE_FILE = os.path.join(BASE_DIR, "highscores.json")
+MAX_HIGHSCORES = 10
 
 # JD05: (Tên độ khó, tốc độ rơi giây/ô, hệ số nhân điểm)
 DIFFICULTIES = [
@@ -24,6 +34,13 @@ DIFFICULTIES = [
 ]
 MIN_FALL_DELAY = 0.08  # JD03: Không để tốc độ rơi tăng vô hạn.
 
+# Thông số tối ưu cảm giác điều khiển (DAS / ARR & Lock Delay)
+DAS_DELAY = 0.13            # Độ trễ trước khi bắt đầu trượt tự động khi giữ phím (giây)
+ARR_INTERVAL = 0.03         # Tốc độ trượt ngang liên tục (~33 ô/giây)
+SOFT_DROP_INTERVAL = 0.035  # Tốc độ rơi nhanh khi giữ phím xuống (~28 ô/giây)
+LOCK_DELAY = 0.50           # Thời gian cho phép lách/xoay sau khi chạm đáy (giây)
+MAX_LOCK_MOVES = 15         # Giới hạn số lần reset độ trễ khóa để tránh treo khối
+
 # Bảng điểm cơ bản khi xóa 1, 2, 3 hoặc 4 hàng cùng lúc.
 LINE_SCORES = {
     1: 100,
@@ -31,6 +48,101 @@ LINE_SCORES = {
     3: 500,
     4: 800,
 }
+
+# Virtual-Key Codes trên Windows để kiểm tra trạng thái giữ phím thời gian thực.
+VK_LEFT_KEYS = (0x25, 0x41)          # Mũi tên trái, A
+VK_RIGHT_KEYS = (0x27, 0x44)         # Mũi tên phải, D
+VK_DOWN_KEYS = (0x28, 0x53, 0x58)    # Mũi tên xuống, S, X
+
+try:
+    _USER32 = ctypes.windll.user32
+except Exception:
+    _USER32 = None
+
+
+def is_any_key_down(vk_codes):
+    """Kiểm tra trực tiếp trạng thái phím vật lý đang được nhấn giữ."""
+    if _USER32 is None:
+        return False
+    try:
+        return any(_USER32.GetAsyncKeyState(vk) & 0x8000 for vk in vk_codes)
+    except Exception:
+        return False
+
+
+def write_terminal(text):
+    """Ghi trực tiếp buffer UTF-8 để giảm độ trễ I/O trên Console."""
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout.buffer.write(text.encode("utf-8"))
+        sys.stdout.buffer.flush()
+    else:
+        sys.stdout.write(text)
+        sys.stdout.flush()
+
+
+# ==========================================
+# QUẢN LÝ LỊCH SỬ TOP 10 HIGH SCORES
+# ==========================================
+def load_highscores():
+    """Đọc danh sách Top 10 điểm cao nhất từ file JSON."""
+    if not os.path.exists(HIGHSCORE_FILE):
+        return []
+    try:
+        with open(HIGHSCORE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, list):
+            return []
+        valid_entries = []
+        for item in data:
+            if isinstance(item, dict) and isinstance(item.get("score"), int):
+                valid_entries.append({
+                    "score": item["score"],
+                    "lines": int(item.get("lines", 0)),
+                    "difficulty": str(item.get("difficulty", "NORMAL")),
+                    "date": str(item.get("date", "--/--/---- --:--")),
+                })
+        valid_entries.sort(key=lambda x: (x["score"], x["lines"]), reverse=True)
+        return valid_entries[:MAX_HIGHSCORES]
+    except Exception:
+        return []
+
+
+def save_highscores(entries):
+    """Lưu danh sách Top 10 điểm cao nhất xuống file JSON."""
+    try:
+        with open(HIGHSCORE_FILE, "w", encoding="utf-8") as f:
+            json.dump(entries[:MAX_HIGHSCORES], f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def get_highest_score():
+    """Trả về mức điểm cao nhất từng đạt được."""
+    scores = load_highscores()
+    return scores[0]["score"] if scores else 0
+
+
+def record_score(score, lines, difficulty):
+    """Lưu điểm mới nếu > 0 và trả về thứ hạng (1..10) nếu lọt vào Top 10."""
+    if score <= 0:
+        return None
+
+    scores = load_highscores()
+    new_entry = {
+        "score": score,
+        "lines": lines,
+        "difficulty": difficulty,
+        "date": datetime.now().strftime("%d/%m/%Y %H:%M"),
+    }
+    scores.append(new_entry)
+    scores.sort(key=lambda x: (x["score"], x["lines"]), reverse=True)
+    top_scores = scores[:MAX_HIGHSCORES]
+    save_highscores(top_scores)
+
+    for idx, entry in enumerate(top_scores, start=1):
+        if entry is new_entry:
+            return idx
+    return None
 
 
 # ==========================================
@@ -71,16 +183,23 @@ class Block:
                 if self.shape[i][j] != " ":
                     board[self.y + i][self.x + j] = " "
 
-    def rotate(self):
-        """Phương thức xoay mặc định 90 độ theo chiều kim đồng hồ"""
+    def rotate(self, clockwise=True):
+        """Xoay khối 90 độ (kèm Wall Kick 1 ô để xoay mượt khi sát tường)."""
         size = len(self.shape)
         rotated = [[" " for _ in range(size)] for _ in range(size)]
         for i in range(size):
             for j in range(size):
-                rotated[j][size - 1 - i] = self.shape[i][j]
+                if clockwise:
+                    rotated[j][size - 1 - i] = self.shape[i][j]
+                else:
+                    rotated[size - 1 - j][i] = self.shape[i][j]
 
-        if self.can_move(0, 0, rotated):
-            self.shape = rotated
+        for dx in (0, -1, 1):
+            if self.can_move(dx, 0, rotated):
+                self.x += dx
+                self.shape = rotated
+                return True
+        return False
 
 
 class BlockO(Block):
@@ -94,8 +213,8 @@ class BlockO(Block):
             [" ", " ", " ", " "],
         ]
 
-    def rotate(self):
-        pass
+    def rotate(self, clockwise=True):
+        return False
 
 
 class BlockI(Block):
@@ -110,7 +229,7 @@ class BlockI(Block):
             [" ", "I", " ", " "],
         ]
 
-    def rotate(self):
+    def rotate(self, clockwise=True):
         if self.is_vertical:
             rotated = [
                 [" ", " ", " ", " "],
@@ -132,7 +251,8 @@ class BlockI(Block):
                 self.x += dx
                 self.shape = rotated
                 self.is_vertical = not self.is_vertical
-                break
+                return True
+        return False
 
 
 class BlockT(Block):
@@ -170,10 +290,17 @@ class BlockL(Block):
         self.shape = [[" ", " ", "L"], ["L", "L", "L"], [" ", " ", " "]]
 
 
-def spawn_block():
-    block_classes = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
-    chosen_class = random.choice(block_classes)
-    return chosen_class(x=5, y=1)
+class BlockBag:
+    """Bộ sinh khối theo cơ chế túi 7 mảnh giúp nhịp độ ra gạch đồng đều."""
+
+    def __init__(self):
+        self._bag = []
+
+    def next_block(self):
+        if not self._bag:
+            self._bag = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
+            random.shuffle(self._bag)
+        return self._bag.pop()(x=5, y=1)
 
 
 # ==========================================
@@ -207,8 +334,8 @@ def render_row(i):
     return "║" + cells + "║"
 
 
-def render_side_row(i, next_block, score):
-    """Vẽ khung xem trước khối tiếp theo và bảng điểm ở bên phải bàn chơi."""
+def render_side_row(i, next_block, score, best_score):
+    """Vẽ khung khối tiếp theo, điểm hiện tại và điểm cao nhất ở bên phải."""
     if i == 0:
         return "  NEXT:"
     if i == 1:
@@ -219,7 +346,6 @@ def render_side_row(i, next_block, score):
         shape = next_block.shape
         size = len(shape)
         r = i - 2
-        # Căn giữa theo chiều dọc đối với các khối ma trận 3x3.
         r_offset = 1 if size == 3 else 0
         cells = []
         for c in range(4):
@@ -239,20 +365,44 @@ def render_side_row(i, next_block, score):
         return f"  ║{str(score).center(8)}║"
     if i == 11:
         return "  ╚════════╝"
+    if i == 13:
+        return "  BEST:"
+    if i == 14:
+        return "  ╔════════╗"
+    if i == 15:
+        return f"  ║{str(best_score).center(8)}║"
+    if i == 16:
+        return "  ╚════════╝"
     return ""
 
 
-def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", next_block=None, score=0):
-    # \033[K xóa phần chữ thừa bên phải trên từng dòng; \033[J xóa phần thừa bên dưới.
-    rows = [render_row(i) + render_side_row(i, next_block, score) for i in range(H)]
-    rows.extend([
-        f"Độ khó: {difficulty} | Hàng đã xóa: {total_lines} | Tốc độ: {fall_delay:.2f}s/ô",
-        "A/D hoặc ←/→: di chuyển | W hoặc ↑: xoay",
-        "S/X hoặc ↓: rơi nhanh | Space: rơi lập tức | Q/Esc: về menu",
-    ])
-    output = "\n".join(line + "\033[K" for line in rows)
-    sys.stdout.write("\033[3J\033[H" + output + "\033[J")
-    sys.stdout.flush()
+def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", next_block=None, score=0, best_score=0):
+    """Vẽ vi phân kết hợp đồng bộ khung hình để loại bỏ hoàn toàn hiện tượng nhấp nháy."""
+    display_best = max(best_score, score)
+    rows = [render_row(i) + render_side_row(i, next_block, score, display_best) for i in range(H)]
+    rows.append(
+        f"Độ khó: {difficulty} | Hàng đã xóa: {total_lines} | Tốc độ: {fall_delay:.2f}s/ô"
+    )
+
+    chunks = []
+    for idx, line in enumerate(rows):
+        if idx >= len(last_frame_lines) or last_frame_lines[idx] != line:
+            chunks.append(f"\033[{idx + 1};1H{line}\033[K")
+
+    if len(last_frame_lines) > len(rows):
+        chunks.append(f"\033[{len(rows) + 1};1H\033[J")
+
+    last_frame_lines[:] = rows
+
+    if chunks:
+        # \033[?2026h ... \033[?2026l khóa bộ đệm hiển thị cho tới khi vẽ xong toàn bộ khung.
+        payload = (
+            "\033[?2026h"
+            + "".join(chunks)
+            + f"\033[{len(rows) + 1};1H"
+            + "\033[?2026l"
+        )
+        write_terminal(payload)
 
 
 # ==========================================
@@ -270,7 +420,6 @@ def remove_line():
                 above_row = target_row - 1
                 board[target_row][1:W - 1] = board[above_row][1:W - 1]
             board[1][1:W - 1] = [" "] * (W - 2)
-            # Không giảm current_row: cần kiểm tra tiếp hàng vừa được dồn xuống.
         else:
             current_row -= 1
     return lines_cleared
@@ -283,7 +432,6 @@ def read_key():
     """Chuẩn hóa phím chữ và phím mũi tên thành một tên thống nhất."""
     key = msvcrt.getch()
 
-    # Phím mũi tên trả về 2 byte, cần đọc byte thứ hai.
     if key in (b"\x00", b"\xe0"):
         second = msvcrt.getch()
         return {
@@ -305,25 +453,105 @@ def read_key():
 
 
 def clear_screen():
-    sys.stdout.write("\033[2J\033[H")
-    sys.stdout.flush()
+    last_frame_lines.clear()
+    write_terminal("\033[3J\033[2J\033[H")
 
 
 # ==========================================
-# JD05: MENU PLAY / DIFFICULTY / EXIT
+# TAB LỊCH SỬ TOP 10 ĐIỂM CAO NHẤT
+# ==========================================
+def show_highscores():
+    """Hiển thị bảng xếp hạng lưu lịch sử 10 lần điểm cao nhất."""
+    scores = load_highscores()
+    lines = [
+        "╔══════════════════════════════════════════════════════════╗",
+        "║               TOP 10 LỊCH SỬ ĐIỂM CAO NHẤT               ║",
+        "╠══════╦════════════╦════════╦══════════╦══════════════════╣",
+        "║ HẠNG ║    ĐIỂM    ║  HÀNG  ║  ĐỘ KHÓ  ║    THỜI GIAN     ║",
+        "╠══════╬════════════╬════════╬══════════╬══════════════════╣",
+    ]
+    for rank in range(1, MAX_HIGHSCORES + 1):
+        if rank <= len(scores):
+            item = scores[rank - 1]
+            rank_str = f"#{rank}".center(4)
+            score_str = f"{item['score']:,}".rjust(10)
+            lines_str = str(item["lines"]).center(6)
+            diff_str = item["difficulty"].center(8)
+            date_str = item["date"].center(16)
+        else:
+            rank_str = f"#{rank}".center(4)
+            score_str = "---".center(10)
+            lines_str = "---".center(6)
+            diff_str = "---".center(8)
+            date_str = "--/--/---- --:--".center(16)
+        lines.append(
+            f"║ {rank_str} ║ {score_str} ║ {lines_str} ║ {diff_str} ║ {date_str} ║"
+        )
+    lines.extend([
+        "╚══════╩════════════╩════════╩══════════╩══════════════════╝",
+        "",
+        "Nhấn phím bất kỳ để quay lại menu chính...",
+    ])
+    clear_screen()
+    write_terminal("\n".join(lines) + "\n")
+    read_key()
+
+
+# ==========================================
+# TAB HƯỚNG DẪN ĐIỀU KHIỂN & TÍNH ĐIỂM
+# ==========================================
+def show_guide():
+    """Hiển thị toàn bộ hướng dẫn điều khiển và cơ chế tính điểm."""
+    lines = [
+        "╔══════════════════════════════════════════════════════╗",
+        "║                 HƯỚNG DẪN CHƠI TETRIS                ║",
+        "╠══════════════════════════════════════════════════════╣",
+        "║  ĐIỀU KHIỂN TRONG GAME:                              ║",
+        "║   • A / D hoặc ← / →   : Di chuyển / giữ để trượt    ║",
+        "║   • W hoặc ↑           : Xoay cùng chiều kim đồng hồ ║",
+        "║   • Z                  : Xoay ngược chiều kim đồng hồ║",
+        "║   • S / X hoặc ↓       : Rơi nhanh (+1 điểm / ô)     ║",
+        "║   • Space              : Rơi lập tức (+2 điểm / ô)   ║",
+        "║   • Q hoặc Esc         : Thoát ván chơi về menu      ║",
+        "╠══════════════════════════════════════════════════════╣",
+        "║  CÁCH TÍNH ĐIỂM:                                     ║",
+        "║   • Xóa 1 hàng (Single) : 100 điểm                   ║",
+        "║   • Xóa 2 hàng (Double) : 300 điểm                   ║",
+        "║   • Xóa 3 hàng (Triple) : 500 điểm                   ║",
+        "║   • Xóa 4 hàng (Tetris) : 800 điểm                   ║",
+        "║   • Hệ số độ khó        : EASY x1 | NORMAL x2 | HARD x3║",
+        "╚══════════════════════════════════════════════════════╝",
+        "",
+        "Nhấn phím bất kỳ để quay lại menu chính...",
+    ]
+    clear_screen()
+    write_terminal("\n".join(lines) + "\n")
+    read_key()
+
+
+# ==========================================
+# JD05: MENU PLAY / DIFFICULTY / HIGH SCORES / GUIDE / EXIT
 # ==========================================
 def show_menu():
     """Trả về (tên độ khó, tốc độ rơi, hệ số điểm), hoặc None nếu chọn thoát."""
-    difficulty_index = 1  # Chọn NORMAL làm mặc định.
-    selected_index = 0     # Trỏ vào PLAY khi mở menu.
+    difficulty_index = 1
+    selected_index = 0
 
     while True:
         difficulty_name, fall_delay, _ = DIFFICULTIES[difficulty_index]
-        options = ["PLAY", f"DIFFICULTY: {difficulty_name}", "EXIT"]
+        best_score = get_highest_score()
+        options = [
+            "PLAY",
+            f"DIFFICULTY: {difficulty_name}",
+            "HIGH SCORES",
+            "GUIDE",
+            "EXIT",
+        ]
         lines = [
             "╔════════════════════════════════════╗",
             "║              TETRIS                ║",
             "╚════════════════════════════════════╝",
+            f"  HIGHEST SCORE: {best_score:,}",
             "",
         ]
         for index, option in enumerate(options):
@@ -333,10 +561,10 @@ def show_menu():
             "",
             "W/S hoặc ↑/↓: chọn mục | Enter: xác nhận",
             "A/D hoặc ←/→: đổi độ khó tại DIFFICULTY",
-            "Có thể bấm 1: PLAY, 2: đổi độ khó, 3: EXIT",
+            "Phím tắt: 1: PLAY | 2: Độ khó | 3: Top 10 | 4: GUIDE | 5: EXIT",
         ])
         clear_screen()
-        print("\n".join(lines), flush=True)
+        write_terminal("\n".join(lines) + "\n")
 
         key = read_key()
         if key in ("up", "w"):
@@ -347,18 +575,28 @@ def show_menu():
             difficulty_index = (difficulty_index - 1) % len(DIFFICULTIES)
         elif key in ("right", "d") and selected_index == 1:
             difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
+        elif key == "1":
+            return DIFFICULTIES[difficulty_index]
         elif key == "2":
             selected_index = 1
             difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
-        elif key == "1":
-            return DIFFICULTIES[difficulty_index]
-        elif key in ("3", "q", "esc"):
+        elif key == "3":
+            selected_index = 2
+            show_highscores()
+        elif key == "4":
+            selected_index = 3
+            show_guide()
+        elif key in ("5", "q", "esc"):
             return None
         elif key == "enter":
             if selected_index == 0:
                 return DIFFICULTIES[difficulty_index]
             if selected_index == 1:
                 difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
+            elif selected_index == 2:
+                show_highscores()
+            elif selected_index == 3:
+                show_guide()
             else:
                 return None
 
@@ -368,76 +606,156 @@ def show_menu():
 # ==========================================
 def play_game(difficulty, base_fall_delay, score_multiplier):
     init_board()
-    current_block = spawn_block()
-    next_block = spawn_block()
+    bag = BlockBag()
+    current_block = bag.next_block()
+    next_block = bag.next_block()
     fall_delay = base_fall_delay
     total_lines = 0
     score = 0
+    best_score = get_highest_score()
     last_fall_time = time.monotonic()
 
+    # Trạng thái giữ phím mượt (DAS / ARR)
+    move_dir = None
+    move_hold_start = 0.0
+    last_auto_move = 0.0
+    soft_drop_active = False
+    last_soft_drop = 0.0
+
+    # Trạng thái độ trễ khóa khối (Lock Delay)
+    lock_start_time = None
+    lock_move_count = 0
+
     clear_screen()
-    sys.stdout.write("\033[?25l")  # Ẩn con trỏ trong lúc chơi.
-    sys.stdout.flush()
+    write_terminal("\033[?25l")  # Ẩn con trỏ trong lúc chơi.
 
     try:
         if not current_block.can_move(0, 0):
-            # Trường hợp không còn chỗ đặt khối đầu tiên.
-            draw(total_lines, fall_delay, difficulty, next_block, score)
-            print(f"\nGAME OVER! Điểm đạt được: {score} | Nhấn phím bất kỳ để về menu.", flush=True)
+            draw(total_lines, fall_delay, difficulty, next_block, score, best_score)
+            write_terminal(f"\nGAME OVER! Điểm đạt được: {score} | Nhấn phím bất kỳ để về menu.\n")
             read_key()
             return
 
         current_block.to_board()
-        draw(total_lines, fall_delay, difficulty, next_block, score)
+        draw(total_lines, fall_delay, difficulty, next_block, score, best_score)
+
+        def register_lock_adjustment(now_ts):
+            nonlocal lock_start_time, lock_move_count
+            if not current_block.can_move(0, 1) and lock_move_count < MAX_LOCK_MOVES:
+                lock_start_time = now_ts
+                lock_move_count += 1
 
         while True:
+            now = time.monotonic()
             needs_redraw = False
             hard_dropped = False
             current_block.del_from_board()
 
-            # Đọc phím thường xuyên, độc lập với đồng hồ rơi tự động.
+            # 1. Đọc các sự kiện bấm phím mới từ hàng đợi
             while msvcrt.kbhit():
                 key = read_key()
-                if key in ("a", "left") and current_block.can_move(-1, 0):
-                    current_block.x -= 1
-                    needs_redraw = True
-                elif key in ("d", "right") and current_block.can_move(1, 0):
-                    current_block.x += 1
-                    needs_redraw = True
-                elif key in ("s", "x", "down") and current_block.can_move(0, 1):
-                    current_block.y += 1
-                    score += 1  # Thưởng 1 điểm cho mỗi ô rơi nhanh chủ động.
-                    last_fall_time = time.monotonic()
-                    needs_redraw = True
+                if key in ("a", "left"):
+                    if move_dir != "left":
+                        if current_block.can_move(-1, 0):
+                            current_block.x -= 1
+                            needs_redraw = True
+                            register_lock_adjustment(now)
+                        move_dir = "left"
+                        move_hold_start = now
+                        last_auto_move = now
+                elif key in ("d", "right"):
+                    if move_dir != "right":
+                        if current_block.can_move(1, 0):
+                            current_block.x += 1
+                            needs_redraw = True
+                            register_lock_adjustment(now)
+                        move_dir = "right"
+                        move_hold_start = now
+                        last_auto_move = now
+                elif key in ("s", "x", "down"):
+                    if not soft_drop_active:
+                        if current_block.can_move(0, 1):
+                            current_block.y += 1
+                            score += 1
+                            last_fall_time = now
+                            needs_redraw = True
+                        soft_drop_active = True
+                        last_soft_drop = now
                 elif key == "space":
-                    # Đưa khối rơi thẳng xuống vị trí thấp nhất và khóa ngay lập tức.
                     dropped_rows = 0
                     while current_block.can_move(0, 1):
                         current_block.y += 1
                         dropped_rows += 1
-                    score += dropped_rows * 2  # Thưởng 2 điểm cho mỗi ô hard drop.
+                    score += dropped_rows * 2
                     hard_dropped = True
                     needs_redraw = True
+                    while msvcrt.kbhit():
+                        read_key()
                     break
                 elif key in ("w", "up"):
-                    current_block.rotate()
-                    needs_redraw = True
+                    if current_block.rotate(clockwise=True):
+                        needs_redraw = True
+                        register_lock_adjustment(now)
+                elif key == "z":
+                    if current_block.rotate(clockwise=False):
+                        needs_redraw = True
+                        register_lock_adjustment(now)
                 elif key in ("q", "esc"):
-                    return  # Trở về menu chính.
+                    return
 
-            now = time.monotonic()
-            if hard_dropped or (now - last_fall_time >= fall_delay):
-                last_fall_time = now
-                needs_redraw = True
-                if current_block.can_move(0, 1):
-                    current_block.y += 1
+            # 2. Xử lý giữ phím trượt ngang mượt (DAS / ARR)
+            if move_dir == "left":
+                if is_any_key_down(VK_LEFT_KEYS):
+                    if now - move_hold_start >= DAS_DELAY and now - last_auto_move >= ARR_INTERVAL:
+                        if current_block.can_move(-1, 0):
+                            current_block.x -= 1
+                            needs_redraw = True
+                            register_lock_adjustment(now)
+                        last_auto_move = now
                 else:
-                    # Cố định khối trước khi xóa hàng (JD02).
+                    move_dir = None
+            elif move_dir == "right":
+                if is_any_key_down(VK_RIGHT_KEYS):
+                    if now - move_hold_start >= DAS_DELAY and now - last_auto_move >= ARR_INTERVAL:
+                        if current_block.can_move(1, 0):
+                            current_block.x += 1
+                            needs_redraw = True
+                            register_lock_adjustment(now)
+                        last_auto_move = now
+                else:
+                    move_dir = None
+
+            # 3. Xử lý giữ phím rơi nhanh mượt (Soft Drop)
+            if soft_drop_active:
+                if is_any_key_down(VK_DOWN_KEYS):
+                    if now - last_soft_drop >= SOFT_DROP_INTERVAL:
+                        if current_block.can_move(0, 1):
+                            current_block.y += 1
+                            score += 1
+                            last_fall_time = now
+                            needs_redraw = True
+                        last_soft_drop = now
+                else:
+                    soft_drop_active = False
+
+            # 4. Trọng lực rơi tự động & cơ chế Lock Delay 0.5s
+            if current_block.can_move(0, 1):
+                lock_start_time = None
+                if now - last_fall_time >= fall_delay:
+                    current_block.y += 1
+                    last_fall_time = now
+                    needs_redraw = True
+                    if not current_block.can_move(0, 1):
+                        lock_start_time = now
+            else:
+                if lock_start_time is None:
+                    lock_start_time = now
+
+                if hard_dropped or (now - lock_start_time >= LOCK_DELAY):
                     current_block.to_board()
                     cleared = remove_line()
                     total_lines += cleared
 
-                    # JD03: Cộng điểm và tăng tốc độ rơi khi xóa được hàng.
                     if cleared > 0:
                         score += LINE_SCORES.get(cleared, cleared * 200) * score_multiplier
                         fall_delay = max(
@@ -446,29 +764,49 @@ def play_game(difficulty, base_fall_delay, score_multiplier):
                         )
 
                     current_block = next_block
-                    next_block = spawn_block()
-                    # Kiểm tra ngay tại vị trí sinh khối, tránh ghi đè gạch cũ.
+                    next_block = bag.next_block()
+                    lock_start_time = None
+                    lock_move_count = 0
+                    last_fall_time = now
+                    needs_redraw = True
+
                     if not current_block.can_move(0, 0):
-                        draw(total_lines, fall_delay, difficulty, next_block, score)
-                        print(f"\nGAME OVER! Điểm đạt được: {score} | Nhấn phím bất kỳ để về menu.", flush=True)
+                        rank = record_score(score, total_lines, difficulty)
+                        final_best = max(best_score, score)
+                        draw(total_lines, fall_delay, difficulty, next_block, score, final_best)
+
+                        if rank == 1:
+                            badge = " | ★ KỶ LỤC MỚI (#1)!"
+                        elif rank is not None:
+                            badge = f" | ★ Lọt Top #{rank}!"
+                        else:
+                            badge = ""
+
+                        write_terminal(
+                            f"\nGAME OVER! Điểm: {score:,}{badge}\n"
+                            "Nhấn phím bất kỳ để về menu.\n"
+                        )
                         read_key()
                         return
 
             current_block.to_board()
             if needs_redraw:
-                draw(total_lines, fall_delay, difficulty, next_block, score)
-            time.sleep(0.01)
+                draw(total_lines, fall_delay, difficulty, next_block, score, best_score)
+            time.sleep(0.004)  # Chu kỳ vòng lặp ~250Hz
     finally:
-        sys.stdout.write("\033[?25h")  # Hiện con trỏ khi rời màn chơi.
-        sys.stdout.flush()
+        write_terminal("\033[?25h")  # Hiện con trỏ khi rời màn chơi.
 
 
 def main():
     random.seed()
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
-    # Kích hoạt khả năng xử lý mã ANSI trên Windows Console nếu được hỗ trợ.
     os.system("")
+
+    timer_boosted = False
+    try:
+        ctypes.windll.winmm.timeBeginPeriod(1)
+        timer_boosted = True
+    except Exception:
+        pass
 
     try:
         while True:
@@ -480,8 +818,12 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        sys.stdout.write("\033[?25h\n")
-        sys.stdout.flush()
+        if timer_boosted:
+            try:
+                ctypes.windll.winmm.timeEndPeriod(1)
+            except Exception:
+                pass
+        write_terminal("\033[?25h\n")
 
 
 if __name__ == "__main__":
