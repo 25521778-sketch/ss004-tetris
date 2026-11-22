@@ -29,7 +29,7 @@ MIN_FALL_DELAY = 0.08  # JD03: Không để tốc độ rơi tăng vô hạn.
 # ==========================================
 class Block:
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     self.x = x
     self.y = y
     self.shape = []
@@ -76,7 +76,7 @@ class Block:
 
 class BlockO(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [
         [" ", " ", " ", " "],
@@ -90,69 +90,72 @@ class BlockO(Block):
 
 
 class BlockI(Block):
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y)
+        self.is_vertical = True
+        self.shape = [
+            [" ", "I", " ", " "],
+            [" ", "I", " ", " "],
+            [" ", "I", " ", " "],
+            [" ", "I", " ", " "],
+        ]
 
-  def __init__(self, x=5, y=0):
-    super().__init__(x, y)
-    self.is_vertical = True
-    self.shape = [
-        [" ", "I", " ", " "],
-        [" ", "I", " ", " "],
-        [" ", "I", " ", " "],
-        [" ", "I", " ", " "],
-    ]
+    def rotate(self):
+        if self.is_vertical:
+            rotated = [
+                [" ", " ", " ", " "],
+                ["I", "I", "I", "I"],
+                [" ", " ", " ", " "],
+                [" ", " ", " ", " "],
+            ]
+        else:
+            rotated = [
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+            ]
 
-  def rotate(self):
-    if self.is_vertical:
-      rotated = [
-          [" ", " ", " ", " "],
-          ["I", "I", "I", "I"],
-          [" ", " ", " ", " "],
-          [" ", " ", " ", " "],
-      ]
-    else:
-      rotated = [
-          [" ", "I", " ", " "],
-          [" ", "I", " ", " "],
-          [" ", "I", " ", " "],
-          [" ", "I", " ", " "],
-      ]
-
-    if self.can_move(0, 0, rotated):
-      self.shape = rotated
-      self.is_vertical = not self.is_vertical
+        # Thử xoay tại chỗ; nếu sát tường thì thử nhích trái/phải 1-2 ô (Wall Kick)
+        for dx in (0, -1, 1, -2, 2):
+            if self.can_move(dx, 0, rotated):
+                self.x += dx
+                self.shape = rotated
+                self.is_vertical = not self.is_vertical
+                break
 
 
 class BlockT(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [[" ", "T", " "], ["T", "T", "T"], [" ", " ", " "]]
 
 
 class BlockS(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [[" ", "S", "S"], ["S", "S", " "], [" ", " ", " "]]
 
 
 class BlockZ(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [["Z", "Z", " "], [" ", "Z", "Z"], [" ", " ", " "]]
 
 
 class BlockJ(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [["J", " ", " "], ["J", "J", "J"], [" ", " ", " "]]
 
 
 class BlockL(Block):
 
-  def __init__(self, x=5, y=0):
+  def __init__(self, x=5, y=1):
     super().__init__(x, y)
     self.shape = [[" ", " ", "L"], ["L", "L", "L"], [" ", " ", " "]]
 
@@ -160,7 +163,7 @@ class BlockL(Block):
 def spawn_block():
   block_classes = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
   chosen_class = random.choice(block_classes)
-  return chosen_class(x=5, y=0)
+  return chosen_class(x=5, y=1)
 
 
 # ==========================================
@@ -194,7 +197,7 @@ def render_row(i):
     return "║" + cells + "║"
 
 
-def draw(total_lines=0, fall_delay=0.5, difficulty="NORMAL"):
+def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL"):
     # Chỉ đưa con trỏ lên đầu để vẽ lại, tránh xóa trắng cả màn hình.
     content = "\n".join(render_row(i) for i in range(H))
     status = (
