@@ -197,9 +197,36 @@ def render_row(i):
     return "║" + cells + "║"
 
 
-def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL"):
+def render_next_row(i, next_block):
+    """Vẽ khung xem trước khối tiếp theo ở bên phải bàn chơi."""
+    if i == 0:
+        return "  NEXT:"
+    if i == 1:
+        return "  ╔════════╗"
+    if 2 <= i <= 5:
+        if next_block is None:
+            return "  ║        ║"
+        shape = next_block.shape
+        size = len(shape)
+        r = i - 2
+        # Căn giữa theo chiều dọc đối với các khối ma trận 3x3.
+        r_offset = 1 if size == 3 else 0
+        cells = []
+        for c in range(4):
+            sr = r - r_offset
+            if 0 <= sr < size and 0 <= c < size and shape[sr][c] != " ":
+                cells.append(CELL_BLOCK)
+            else:
+                cells.append(CELL_EMPTY)
+        return "  ║" + "".join(cells) + "║"
+    if i == 6:
+        return "  ╚════════╝"
+    return ""
+
+
+def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", next_block=None):
     # \033[K xóa phần chữ thừa bên phải trên từng dòng; \033[J xóa phần thừa bên dưới.
-    rows = [render_row(i) for i in range(H)]
+    rows = [render_row(i) + render_next_row(i, next_block) for i in range(H)]
     rows.extend([
         f"Độ khó: {difficulty} | Hàng đã xóa: {total_lines} | Tốc độ: {fall_delay:.2f}s/ô",
         "A/D hoặc ←/→: di chuyển | W hoặc ↑: xoay",
@@ -324,6 +351,7 @@ def show_menu():
 def play_game(difficulty, base_fall_delay):
     init_board()
     current_block = spawn_block()
+    next_block = spawn_block()
     fall_delay = base_fall_delay
     total_lines = 0
     last_fall_time = time.monotonic()
@@ -335,13 +363,13 @@ def play_game(difficulty, base_fall_delay):
     try:
         if not current_block.can_move(0, 0):
             # Trường hợp không còn chỗ đặt khối đầu tiên.
-            draw(total_lines, fall_delay, difficulty)
+            draw(total_lines, fall_delay, difficulty, next_block)
             print("\nGAME OVER! Nhấn phím bất kỳ để về menu.", flush=True)
             read_key()
             return
 
         current_block.to_board()
-        draw(total_lines, fall_delay, difficulty)
+        draw(total_lines, fall_delay, difficulty, next_block)
 
         while True:
             needs_redraw = False
@@ -393,17 +421,18 @@ def play_game(difficulty, base_fall_delay):
                             fall_delay * (0.9 ** cleared),
                         )
 
-                    current_block = spawn_block()
+                    current_block = next_block
+                    next_block = spawn_block()
                     # Kiểm tra ngay tại vị trí sinh khối, tránh ghi đè gạch cũ.
                     if not current_block.can_move(0, 0):
-                        draw(total_lines, fall_delay, difficulty)
+                        draw(total_lines, fall_delay, difficulty, next_block)
                         print("\nGAME OVER! Nhấn phím bất kỳ để về menu.", flush=True)
                         read_key()
                         return
 
             current_block.to_board()
             if needs_redraw:
-                draw(total_lines, fall_delay, difficulty)
+                draw(total_lines, fall_delay, difficulty, next_block)
             time.sleep(0.01)
     finally:
         sys.stdout.write("\033[?25h")  # Hiện con trỏ khi rời màn chơi.
