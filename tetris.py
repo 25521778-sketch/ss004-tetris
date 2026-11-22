@@ -2,13 +2,14 @@ import os
 import random
 import sys
 import time
+sys.stdout.reconfigure(encoding='utf-8')
 
 # Trò chơi sử dụng msvcrt để đọc bàn phím không cần nhấn Enter trên Windows.
 try:
-    import msvcrt
+  import msvcrt
 except ImportError:
-    print("Mã nguồn này yêu cầu Windows để chạy thư viện msvcrt.")
-    sys.exit(1)
+  print("Mã nguồn này yêu cầu Windows để chạy thư viện msvcrt.")
+  sys.exit()
 
 H = 20
 W = 15
@@ -27,130 +28,139 @@ MIN_FALL_DELAY = 0.08  # JD03: Không để tốc độ rơi tăng vô hạn.
 # JD01: LỚP CHA VÀ CÁC LỚP KHỐI KẾ THỪA
 # ==========================================
 class Block:
-    def __init__(self, x=5, y=1):
-        self.x = x
-        self.y = y
-        self.shape = []
 
-    def can_move(self, dx, dy, target_shape=None):
-        matrix = target_shape if target_shape is not None else self.shape
-        size = len(matrix)
-        for i in range(size):
-            for j in range(size):
-                if matrix[i][j] != " ":
-                    xt = self.x + j + dx
-                    yt = self.y + i + dy
-                    if xt < 1 or xt >= W - 1 or yt < 1 or yt >= H - 1:
-                        return False
-                    if board[yt][xt] != " ":
-                        return False
-        return True
+  def __init__(self, x=5, y=0):
+    self.x = x
+    self.y = y
+    self.shape = []
 
-    def to_board(self):
-        size = len(self.shape)
-        for i in range(size):
-            for j in range(size):
-                if self.shape[i][j] != " ":
-                    board[self.y + i][self.x + j] = self.shape[i][j]
+  def can_move(self, dx, dy, target_shape=None):
+    matrix = target_shape if target_shape is not None else self.shape
+    size = len(matrix)
+    for i in range(size):
+      for j in range(size):
+        if matrix[i][j] != " ":
+          xt = self.x + j + dx
+          yt = self.y + i + dy
+          if xt < 1 or xt >= W - 1 or yt >= H - 1:
+            return False
+          if board[yt][xt] != " ":
+            return False
+    return True
 
-    def del_from_board(self):
-        size = len(self.shape)
-        for i in range(size):
-            for j in range(size):
-                if self.shape[i][j] != " ":
-                    board[self.y + i][self.x + j] = " "
+  def to_board(self):
+    size = len(self.shape)
+    for i in range(size):
+      for j in range(size):
+        if self.shape[i][j] != " ":
+          board[self.y + i][self.x + j] = self.shape[i][j]
 
-    def rotate(self):
-        """Xoay khối 90 độ theo chiều kim đồng hồ nếu còn chỗ trống."""
-        size = len(self.shape)
-        rotated = [[" " for _ in range(size)] for _ in range(size)]
-        for i in range(size):
-            for j in range(size):
-                rotated[j][size - 1 - i] = self.shape[i][j]
-        if self.can_move(0, 0, rotated):
-            self.shape = rotated
+  def del_from_board(self):
+    size = len(self.shape)
+    for i in range(size):
+      for j in range(size):
+        if self.shape[i][j] != " ":
+          board[self.y + i][self.x + j] = " "
+
+  def rotate(self):
+    """Phương thức xoay mặc định 90 độ theo chiều kim đồng hồ"""
+    size = len(self.shape)
+    rotated = [[" " for _ in range(size)] for _ in range(size)]
+    for i in range(size):
+      for j in range(size):
+        rotated[j][size - 1 - i] = self.shape[i][j]
+
+    if self.can_move(0, 0, rotated):
+      self.shape = rotated
 
 
 class BlockO(Block):
-    def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [
-            [" ", " ", " ", " "],
-            [" ", "O", "O", " "],
-            [" ", "O", "O", " "],
-            [" ", " ", " ", " "],
-        ]
 
-    def rotate(self):
-        pass  # Khối O giữ nguyên hình dạng khi xoay.
+  def __init__(self, x=5, y=0):
+    super().__init__(x, y)
+    self.shape = [
+        [" ", " ", " ", " "],
+        [" ", "O", "O", " "],
+        [" ", "O", "O", " "],
+        [" ", " ", " ", " "],
+    ]
+
+  def rotate(self):
+    pass
 
 
 class BlockI(Block):
-    def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.is_vertical = True
-        self.shape = [
-            [" ", "I", " ", " "],
-            [" ", "I", " ", " "],
-            [" ", "I", " ", " "],
-            [" ", "I", " ", " "],
-        ]
 
-    def rotate(self):
-        if self.is_vertical:
-            rotated = [
-                [" ", " ", " ", " "],
-                ["I", "I", "I", "I"],
-                [" ", " ", " ", " "],
-                [" ", " ", " ", " "],
-            ]
-        else:
-            rotated = [
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-            ]
-        if self.can_move(0, 0, rotated):
-            self.shape = rotated
-            self.is_vertical = not self.is_vertical
+  def __init__(self, x=5, y=0):
+    super().__init__(x, y)
+    self.is_vertical = True
+    self.shape = [
+        [" ", "I", " ", " "],
+        [" ", "I", " ", " "],
+        [" ", "I", " ", " "],
+        [" ", "I", " ", " "],
+    ]
+
+  def rotate(self):
+    if self.is_vertical:
+      rotated = [
+          [" ", " ", " ", " "],
+          ["I", "I", "I", "I"],
+          [" ", " ", " ", " "],
+          [" ", " ", " ", " "],
+      ]
+    else:
+      rotated = [
+          [" ", "I", " ", " "],
+          [" ", "I", " ", " "],
+          [" ", "I", " ", " "],
+          [" ", "I", " ", " "],
+      ]
+
+    if self.can_move(0, 0, rotated):
+      self.shape = rotated
+      self.is_vertical = not self.is_vertical
 
 
 class BlockT(Block):
-    def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [[" ", "T", " "], ["T", "T", "T"], [" ", " ", " "]]
+
+  def __init__(self, x=5, y=0):
+    super().__init__(x, y)
+    self.shape = [[" ", "T", " "], ["T", "T", "T"], [" ", " ", " "]]
 
 
 class BlockS(Block):
-    def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [[" ", "S", "S"], ["S", "S", " "], [" ", " ", " "]]
+
+  def __init__(self, x=5, y=0):
+    super().__init__(x, y)
+    self.shape = [[" ", "S", "S"], ["S", "S", " "], [" ", " ", " "]]
 
 
 class BlockZ(Block):
-    def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [["Z", "Z", " "], [" ", "Z", "Z"], [" ", " ", " "]]
+
+  def __init__(self, x=5, y=0):
+    super().__init__(x, y)
+    self.shape = [["Z", "Z", " "], [" ", "Z", "Z"], [" ", " ", " "]]
 
 
 class BlockJ(Block):
-    def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [["J", " ", " "], ["J", "J", "J"], [" ", " ", " "]]
+
+  def __init__(self, x=5, y=0):
+    super().__init__(x, y)
+    self.shape = [["J", " ", " "], ["J", "J", "J"], [" ", " ", " "]]
 
 
 class BlockL(Block):
-    def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [[" ", " ", "L"], ["L", "L", "L"], [" ", " ", " "]]
+
+  def __init__(self, x=5, y=0):
+    super().__init__(x, y)
+    self.shape = [[" ", " ", "L"], ["L", "L", "L"], [" ", " ", " "]]
 
 
 def spawn_block():
-    block_classes = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
-    chosen_class = random.choice(block_classes)
-    # Bắt đầu ở hàng 1 để khối I không ghi đè viền trên của bàn chơi.
-    return chosen_class(x=5, y=1)
+  block_classes = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
+  chosen_class = random.choice(block_classes)
+  return chosen_class(x=5, y=0)
 
 
 # ==========================================
@@ -378,6 +388,8 @@ def play_game(difficulty, base_fall_delay):
                         read_key()
                         return
 
+          current_block = spawn_block()
+          if not current_block.can_move(0, 1):
             current_block.to_board()
             if needs_redraw:
                 draw(total_lines, fall_delay, difficulty)
