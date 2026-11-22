@@ -1,7 +1,8 @@
-import os
+import os  # noqa: I001
 import time
 import random
 import sys
+import pygame
 
 # Yêu cầu chạy trên Windows Terminal do dùng msvcrt giả lập conio.h
 try:
@@ -64,6 +65,39 @@ class Block:
 
         if self.can_move(0, 0, rotated):
             self.shape = rotated
+    def get_ghost_y(self):
+        """Tìm hàng y thấp nhất mà khối hiện tại có thể rơi tới."""
+        dy = 0
+        while self.can_move(0, dy + 1):
+            dy += 1
+        return self.y + dy
+
+    def ghost_to_board(self, ghost_char="."):
+        """Vẽ bóng mờ lên board tại vị trí rơi thấp nhất."""
+        ghost_y = self.get_ghost_y()
+        if ghost_y == self.y:
+            return
+
+        size = len(self.shape)
+        for i in range(size):
+            for j in range(size):
+                if self.shape[i][j] != " ":
+                    gx = self.x + j
+                    gy = ghost_y + i
+                    if 1 <= gx < W - 1 and 1 <= gy < H - 1 and board[gy][gx] == " ":
+                        board[gy][gx] = ghost_char
+
+    def del_ghost_from_board(self, ghost_char="."):
+        """Xóa ký tự bóng mờ khỏi board."""
+        ghost_y = self.get_ghost_y()
+        size = len(self.shape)
+        for i in range(size):
+            for j in range(size):
+                if self.shape[i][j] != " ":
+                    gx = self.x + j
+                    gy = ghost_y + i
+                    if 1 <= gx < W - 1 and 1 <= gy < H - 1 and board[gy][gx] == ghost_char:
+                        board[gy][gx] = " "
 
 
 # ==========================================
@@ -113,6 +147,43 @@ class BlockI(Block):
         if self.can_move(0, 0, rotated):
             self.shape = rotated
             self.is_vertical = not self.is_vertical
+
+    # Bên trong class Block (sau def rotate):
+    def get_ghost_y(self):
+        """Tìm hàng y thấp nhất mà khối hiện tại có thể rơi tới."""
+        dy = 0
+        while self.can_move(0, dy + 1):
+            dy += 1
+        return self.y + dy
+
+    def ghost_to_board(self, ghost_char="."):
+        """Vẽ bóng mờ lên board tại vị trí rơi thấp nhất."""
+        ghost_y = self.get_ghost_y()
+        if ghost_y == self.y:
+            return
+
+        size = len(self.shape)
+        for i in range(size):
+            for j in range(size):
+                if self.shape[i][j] != " ":
+                    gx = self.x + j
+                    gy = ghost_y + i
+                    if 1 <= gx < W - 1 and 1 <= gy < H - 1 and board[gy][gx] == " ":
+                        board[gy][gx] = ghost_char
+
+    def del_ghost_from_board(self, ghost_char="."):
+        """Xóa ký tự bóng mờ khỏi board."""
+        ghost_y = self.get_ghost_y()
+        size = len(self.shape)
+        for i in range(size):
+            for j in range(size):
+                if self.shape[i][j] != " ":
+                    gx = self.x + j
+                    gy = ghost_y + i
+                    if 1 <= gx < W - 1 and 1 <= gy < H - 1 and board[gy][gx] == ghost_char:
+                        board[gy][gx] = " "
+
+
 
 
 class BlockT(Block):
@@ -201,6 +272,7 @@ def main():
     try:
         while True:
             current_block.del_from_board()
+            current_block.del_ghost_from_board()
 
             # Đọc phím điều khiển
             if msvcrt.kbhit():
@@ -228,7 +300,7 @@ def main():
                 current_block.to_board()
                 remove_line()
                 current_block = spawn_block()
-
+            current_block.ghost_to_board()
             current_block.to_board()
             draw()
             time.sleep(0.5)
