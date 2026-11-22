@@ -71,13 +71,16 @@ class Block:
                 if self.shape[i][j] != " ":
                     board[self.y + i][self.x + j] = " "
 
-    def rotate(self):
-        """Phương thức xoay mặc định 90 độ theo chiều kim đồng hồ"""
+    def rotate(self, clockwise=True):
+        """Xoay khối 90 độ: cùng chiều (True) hoặc ngược chiều kim đồng hồ (False)."""
         size = len(self.shape)
         rotated = [[" " for _ in range(size)] for _ in range(size)]
         for i in range(size):
             for j in range(size):
-                rotated[j][size - 1 - i] = self.shape[i][j]
+                if clockwise:
+                    rotated[j][size - 1 - i] = self.shape[i][j]
+                else:
+                    rotated[size - 1 - j][i] = self.shape[i][j]
 
         if self.can_move(0, 0, rotated):
             self.shape = rotated
@@ -94,7 +97,7 @@ class BlockO(Block):
             [" ", " ", " ", " "],
         ]
 
-    def rotate(self):
+    def rotate(self, clockwise=True):
         pass
 
 
@@ -110,7 +113,7 @@ class BlockI(Block):
             [" ", "I", " ", " "],
         ]
 
-    def rotate(self):
+    def rotate(self, clockwise=True):
         if self.is_vertical:
             rotated = [
                 [" ", " ", " ", " "],
@@ -243,13 +246,11 @@ def render_side_row(i, next_block, score):
 
 
 def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", next_block=None, score=0):
-    # \033[K xóa phần chữ thừa bên phải trên từng dòng; \033[J xóa phần thừa bên dưới.
+    # Màn hình chơi gọn gàng, toàn bộ hướng dẫn đã chuyển sang tab GUIDE ở menu.
     rows = [render_row(i) + render_side_row(i, next_block, score) for i in range(H)]
-    rows.extend([
-        f"Độ khó: {difficulty} | Hàng đã xóa: {total_lines} | Tốc độ: {fall_delay:.2f}s/ô",
-        "A/D hoặc ←/→: di chuyển | W hoặc ↑: xoay",
-        "S/X hoặc ↓: rơi nhanh | Space: rơi lập tức | Q/Esc: về menu",
-    ])
+    rows.append(
+        f"Độ khó: {difficulty} | Hàng đã xóa: {total_lines} | Tốc độ: {fall_delay:.2f}s/ô"
+    )
     output = "\n".join(line + "\033[K" for line in rows)
     sys.stdout.write("\033[3J\033[H" + output + "\033[J")
     sys.stdout.flush()
@@ -310,7 +311,39 @@ def clear_screen():
 
 
 # ==========================================
-# JD05: MENU PLAY / DIFFICULTY / EXIT
+# TAB HƯỚNG DẪN ĐIỀU KHIỂN & TÍNH ĐIỂM
+# ==========================================
+def show_guide():
+    """Hiển thị toàn bộ hướng dẫn điều khiển và cơ chế tính điểm."""
+    lines = [
+        "╔══════════════════════════════════════════════════════╗",
+        "║                 HƯỚNG DẪN CHƠI TETRIS                ║",
+        "╠══════════════════════════════════════════════════════╣",
+        "║  ĐIỀU KHIỂN TRONG GAME:                              ║",
+        "║   • A / D hoặc ← / →   : Di chuyển trái / phải       ║",
+        "║   • W hoặc ↑           : Xoay cùng chiều kim đồng hồ ║",
+        "║   • Z                  : Xoay ngược chiều kim đồng hồ║",
+        "║   • S / X hoặc ↓       : Rơi nhanh (+1 điểm / ô)     ║",
+        "║   • Space              : Rơi lập tức (+2 điểm / ô)   ║",
+        "║   • Q hoặc Esc         : Thoát ván chơi về menu      ║",
+        "╠══════════════════════════════════════════════════════╣",
+        "║  CÁCH TÍNH ĐIỂM:                                     ║",
+        "║   • Xóa 1 hàng (Single) : 100 điểm                   ║",
+        "║   • Xóa 2 hàng (Double) : 300 điểm                   ║",
+        "║   • Xóa 3 hàng (Triple) : 500 điểm                   ║",
+        "║   • Xóa 4 hàng (Tetris) : 800 điểm                   ║",
+        "║   • Hệ số độ khó        : EASY x1 | NORMAL x2 | HARD x3║",
+        "╚══════════════════════════════════════════════════════╝",
+        "",
+        "Nhấn phím bất kỳ để quay lại menu chính...",
+    ]
+    clear_screen()
+    print("\n".join(lines), flush=True)
+    read_key()
+
+
+# ==========================================
+# JD05: MENU PLAY / DIFFICULTY / GUIDE / EXIT
 # ==========================================
 def show_menu():
     """Trả về (tên độ khó, tốc độ rơi, hệ số điểm), hoặc None nếu chọn thoát."""
@@ -319,7 +352,7 @@ def show_menu():
 
     while True:
         difficulty_name, fall_delay, _ = DIFFICULTIES[difficulty_index]
-        options = ["PLAY", f"DIFFICULTY: {difficulty_name}", "EXIT"]
+        options = ["PLAY", f"DIFFICULTY: {difficulty_name}", "GUIDE", "EXIT"]
         lines = [
             "╔════════════════════════════════════╗",
             "║              TETRIS                ║",
@@ -333,7 +366,7 @@ def show_menu():
             "",
             "W/S hoặc ↑/↓: chọn mục | Enter: xác nhận",
             "A/D hoặc ←/→: đổi độ khó tại DIFFICULTY",
-            "Có thể bấm 1: PLAY, 2: đổi độ khó, 3: EXIT",
+            "Phím tắt: 1: PLAY | 2: Độ khó | 3: GUIDE | 4: EXIT",
         ])
         clear_screen()
         print("\n".join(lines), flush=True)
@@ -347,18 +380,23 @@ def show_menu():
             difficulty_index = (difficulty_index - 1) % len(DIFFICULTIES)
         elif key in ("right", "d") and selected_index == 1:
             difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
+        elif key == "1":
+            return DIFFICULTIES[difficulty_index]
         elif key == "2":
             selected_index = 1
             difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
-        elif key == "1":
-            return DIFFICULTIES[difficulty_index]
-        elif key in ("3", "q", "esc"):
+        elif key == "3":
+            selected_index = 2
+            show_guide()
+        elif key in ("4", "q", "esc"):
             return None
         elif key == "enter":
             if selected_index == 0:
                 return DIFFICULTIES[difficulty_index]
             if selected_index == 1:
                 difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
+            elif selected_index == 2:
+                show_guide()
             else:
                 return None
 
@@ -420,7 +458,10 @@ def play_game(difficulty, base_fall_delay, score_multiplier):
                     needs_redraw = True
                     break
                 elif key in ("w", "up"):
-                    current_block.rotate()
+                    current_block.rotate(clockwise=True)
+                    needs_redraw = True
+                elif key == "z":
+                    current_block.rotate(clockwise=False)
                     needs_redraw = True
                 elif key in ("q", "esc"):
                     return  # Trở về menu chính.
