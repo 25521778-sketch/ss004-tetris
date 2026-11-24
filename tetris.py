@@ -110,7 +110,7 @@ class Block:
 
     if self.can_move(0, 0, rotated):
       self.shape = rotated
-
+# TẠO BÓNG MỜ
   def get_ghost_y(self):
     """Tìm hàng y thấp nhất mà khối hiện tại có thể rơi tới."""
     dy = 0
