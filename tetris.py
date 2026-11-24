@@ -23,6 +23,44 @@ DIFFICULTIES = [
 ]
 MIN_FALL_DELAY = 0.08  # JD03: Không để tốc độ rơi tăng vô hạn.
 
+# Hệ thống điểm: Single / Double / Triple / Tetris (4 hàng).
+LINE_CLEAR_POINTS = {1: 100, 2: 300, 3: 500, 4: 800}
+COMBO_BONUS = 50
+LINES_PER_LEVEL = 10
+
+
+class GameStats:
+    """Lưu điểm, số hàng đã xóa, cấp độ và chuỗi Combo hiện tại."""
+
+    def __init__(self):
+        self.score = 0
+        self.total_lines = 0
+        self.level = 1
+        self.combo = 0
+        self._clear_streak = 0
+
+    def record_lock(self, cleared):
+        """Gọi khi một khối đã chạm đáy; trả về điểm của lượt đặt khối.
+
+        Combo 1 là lần xóa hàng thứ hai liên tiếp, không có lượt đặt
+        khối nào xen giữa mà không xóa được hàng.
+        """
+        if cleared == 0:
+            self._clear_streak = 0
+            self.combo = 0
+            return 0
+        if cleared not in LINE_CLEAR_POINTS:
+            raise ValueError("Mỗi khối chỉ có thể xóa từ 1 đến 4 hàng")
+
+        self._clear_streak += 1
+        self.combo = self._clear_streak - 1
+        # Dùng Level trước lượt xóa hiện tại để nhân điểm.
+        earned = (LINE_CLEAR_POINTS[cleared] + COMBO_BONUS * self.combo) * self.level
+        self.score += earned
+        self.total_lines += cleared
+        self.level = 1 + self.total_lines // LINES_PER_LEVEL
+        return earned
+
 
 # ==========================================
 # JD01: LỚP CHA VÀ CÁC LỚP KHỐI KẾ THỪA
@@ -197,11 +235,13 @@ def render_row(i):
     return "║" + cells + "║"
 
 
-def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False):
+def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False,
+         score=0, level=1, combo=0):
     # Chỉ đưa con trỏ lên đầu để vẽ lại, tránh xóa trắng cả màn hình.
     content = "\n".join(render_row(i) for i in range(H))
     status = (
-        f"\nĐộ khó: {difficulty} | Hàng đã xóa: {total_lines} "
+        f"\nĐộ khó: {difficulty} | Điểm: {score} | Level: {level}"
+        f"\nHàng đã xóa: {total_lines} | Combo: {combo} "
         f"| Tốc độ: {fall_delay:.2f}s/ô"
         "\nA/D hoặc ←/→: di chuyển | W hoặc ↑: xoay"
         "\nS/X hoặc ↓: rơi nhanh | P: tạm dừng | Q/Esc: về menu"
@@ -325,8 +365,12 @@ def play_game(difficulty, base_fall_delay):
     init_board()
     current_block = spawn_block()
     fall_delay = base_fall_delay
-    total_lines = 0
+    stats = GameStats()
     last_fall_time = time.monotonic()
+
+    def draw_game(paused=False):
+        draw(stats.total_lines, fall_delay, difficulty, paused=paused,
+             score=stats.score, level=stats.level, combo=stats.combo)
 
     clear_screen()
     sys.stdout.write("\033[?25l")  # Ẩn con trỏ trong lúc chơi.
@@ -335,13 +379,13 @@ def play_game(difficulty, base_fall_delay):
     try:
         if not current_block.can_move(0, 0):
             # Trường hợp không còn chỗ đặt khối đầu tiên.
-            draw(total_lines, fall_delay, difficulty)
+            draw_game()
             print("\nGAME OVER! Nhấn phím bất kỳ để về menu.", flush=True)
             read_key()
             return
 
         current_block.to_board()
-        draw(total_lines, fall_delay, difficulty)
+        draw_game()
 
         while True:
             needs_redraw = False
@@ -366,7 +410,7 @@ def play_game(difficulty, base_fall_delay):
                 elif key == "p":
                     # Giữ nguyên khối đang rơi và hiển thị trạng thái tạm dừng.
                     current_block.to_board()
-                    draw(total_lines, fall_delay, difficulty, paused=True)
+                    draw_game(paused=True)
                     pause_start = time.monotonic()
                     while True:
                         pause_key = read_key()  # Đợi phím, không cập nhật game.
@@ -391,9 +435,10 @@ def play_game(difficulty, base_fall_delay):
                     # Cố định khối trước khi xóa hàng (JD02).
                     current_block.to_board()
                     cleared = remove_line()
-                    total_lines += cleared
+                    stats.record_lock(cleared)
 
-                    # JD03: Càng xóa nhiều hàng, gạch rơi càng nhanh.
+                    # JD03: Giữ cơ chế cũ: xóa càng nhiều hàng, rơi càng nhanh.
+                    # Level tăng sau mỗi 10 hàng và nhân điểm theo bảng quy định.
                     if cleared > 0:
                         fall_delay = max(
                             MIN_FALL_DELAY,
@@ -403,14 +448,14 @@ def play_game(difficulty, base_fall_delay):
                     current_block = spawn_block()
                     # Kiểm tra ngay tại vị trí sinh khối, tránh ghi đè gạch cũ.
                     if not current_block.can_move(0, 0):
-                        draw(total_lines, fall_delay, difficulty)
+                        draw_game()
                         print("\nGAME OVER! Nhấn phím bất kỳ để về menu.", flush=True)
                         read_key()
                         return
 
             current_block.to_board()
             if needs_redraw:
-                draw(total_lines, fall_delay, difficulty)
+                draw_game()
             time.sleep(0.01)
     finally:
         sys.stdout.write("\033[?25h")  # Hiện con trỏ khi rời màn chơi.
