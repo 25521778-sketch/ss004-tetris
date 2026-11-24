@@ -1,15 +1,15 @@
-import os
+import os  # noqa: I001
+import time
 import random
 import sys
-import time
-sys.stdout.reconfigure(encoding='utf-8')
+import pygame
 
 # Trò chơi sử dụng msvcrt để đọc bàn phím không cần nhấn Enter trên Windows.
 try:
-  import msvcrt
+    import msvcrt
 except ImportError:
-  print("Mã nguồn này yêu cầu Windows để chạy thư viện msvcrt.")
-  sys.exit()
+    print("Mã nguồn này yêu cầu Windows để chạy thư viện msvcrt.")
+    sys.exit()
 
 H = 20
 W = 15
@@ -111,8 +111,50 @@ class Block:
     if self.can_move(0, 0, rotated):
       self.shape = rotated
 
+  def get_ghost_y(self):
+    """Tìm hàng y thấp nhất mà khối hiện tại có thể rơi tới."""
+    dy = 0
+    while self.can_move(0, dy + 1):
+      dy += 1
+    return self.y + dy
+
+  def ghost_to_board(self, ghost_char="."):
+    """Vẽ bóng mờ lên board tại vị trí rơi thấp nhất."""
+    ghost_y = self.get_ghost_y()
+    if ghost_y == self.y:
+      return
+
+    size = len(self.shape)
+    for i in range(size):
+      for j in range(size):
+        if self.shape[i][j] != " ":
+          gx = self.x + j
+          gy = ghost_y + i
+          if 1 <= gx < W - 1 and 1 <= gy < H - 1 and board[gy][gx] == " ":
+            board[gy][gx] = ghost_char
+
+  def del_ghost_from_board(self, ghost_char="."):
+    """Xóa ký tự bóng mờ khỏi board."""
+    ghost_y = self.get_ghost_y()
+    size = len(self.shape)
+    for i in range(size):
+      for j in range(size):
+        if self.shape[i][j] != " ":
+          gx = self.x + j
+          gy = ghost_y + i
+          if 1 <= gx < W - 1 and 1 <= gy < H - 1 and board[gy][gx] == ghost_char:
+            board[gy][gx] = " "
+
 
 class BlockO(Block):
+    def __init__(self, x=5, y=0):
+        super().__init__(x, y)
+        self.shape = [
+            [" ", " ", " ", " "],
+            [" ", "O", "O", " "],
+            [" ", "O", "O", " "],
+            [" ", " ", " ", " "],
+        ]
 
   def __init__(self, x=5, y=1):
     super().__init__(x, y)
@@ -163,7 +205,6 @@ class BlockI(Block):
                 break
 
 
-class BlockT(Block):
 
   def __init__(self, x=5, y=1):
     super().__init__(x, y)
@@ -270,7 +311,6 @@ def remove_line():
             # Không giảm current_row: cần kiểm tra tiếp hàng vừa được dồn xuống.
         else:
             current_row -= 1
-    return lines_cleared
 
 
 # ==========================================
