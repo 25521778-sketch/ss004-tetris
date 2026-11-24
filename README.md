@@ -1,6 +1,6 @@
 # SS004.R11 – Đồ án cuối kì: Game Tetris (C++)
 
-Repo code của nhóm. Mã nguồn gốc: `Tetris.cpp` (file của thầy).
+Repo code của nhóm.
 
 ## Thành viên
 | MSSV | Họ tên |
