@@ -197,15 +197,17 @@ def render_row(i):
     return "║" + cells + "║"
 
 
-def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL"):
+def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False):
     # Chỉ đưa con trỏ lên đầu để vẽ lại, tránh xóa trắng cả màn hình.
     content = "\n".join(render_row(i) for i in range(H))
     status = (
         f"\nĐộ khó: {difficulty} | Hàng đã xóa: {total_lines} "
         f"| Tốc độ: {fall_delay:.2f}s/ô"
         "\nA/D hoặc ←/→: di chuyển | W hoặc ↑: xoay"
-        "\nS/X hoặc ↓: rơi nhanh | Q/Esc: về menu"
+        "\nS/X hoặc ↓: rơi nhanh | P: tạm dừng | Q/Esc: về menu"
     )
+    if paused:
+        status += "\n*** TẠM DỪNG *** | P: tiếp tục | Q/Esc: về menu"
     sys.stdout.write("\033[H" + content + status + "\033[J")
     sys.stdout.flush()
 
@@ -361,6 +363,21 @@ def play_game(difficulty, base_fall_delay):
                 elif key in ("w", "up"):
                     current_block.rotate()
                     needs_redraw = True
+                elif key == "p":
+                    # Giữ nguyên khối đang rơi và hiển thị trạng thái tạm dừng.
+                    current_block.to_board()
+                    draw(total_lines, fall_delay, difficulty, paused=True)
+                    pause_start = time.monotonic()
+                    while True:
+                        pause_key = read_key()  # Đợi phím, không cập nhật game.
+                        if pause_key == "p":
+                            # Bù thời gian pause để khối không rơi bù khi tiếp tục.
+                            last_fall_time += time.monotonic() - pause_start
+                            needs_redraw = True
+                            break
+                        if pause_key in ("q", "esc"):
+                            return  # Thoát về menu ngay cả khi đang tạm dừng.
+                    current_block.del_from_board()
                 elif key in ("q", "esc"):
                     return  # Trở về menu chính.
 
