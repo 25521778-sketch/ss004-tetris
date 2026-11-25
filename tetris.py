@@ -23,6 +23,20 @@ DIFFICULTIES = [
 ]
 MIN_FALL_DELAY = 0.08  # JD03: Không để tốc độ rơi tăng vô hạn.
 
+# Nội dung Guide dùng chung cho menu chính và Pause Menu.
+GUIDE_ITEMS = [
+    "A / ←         : Di chuyển sang trái",
+    "D / →         : Di chuyển sang phải",
+    "W / ↑         : Xoay thuận chiều kim đồng hồ",
+    "Z             : Xoay ngược chiều kim đồng hồ",
+    "S / X / ↓     : Rơi nhanh",
+    "SPACE         : Rơi tức thì",
+    "P             : Tạm dừng / tiếp tục",
+    "Q / ESC       : Về menu",
+    "",
+    "Nhấn phím bất kỳ để trở về.",
+]
+
 # Hệ thống điểm: Single / Double / Triple / Tetris (4 hàng).
 LINE_CLEAR_POINTS = {1: 100, 2: 300, 3: 500, 4: 800}
 COMBO_BONUS = 50
@@ -273,18 +287,25 @@ def render_row(i):
 
 def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False,
          score=0, level=1, combo=0):
-    # Chỉ đưa con trỏ lên đầu để vẽ lại, tránh xóa trắng cả màn hình.
-    content = "\n".join(render_row(i) for i in range(H))
-    status = (
-        f"\nĐộ khó: {difficulty} | Điểm: {score} | Level: {level}"
-        f"\nHàng đã xóa: {total_lines} | Combo: {combo} "
-        f"| Tốc độ: {fall_delay:.2f}s/ô"
-        "\nA/D hoặc ←/→: di chuyển | W/↑: xoay thuận | Z: xoay ngược"
-        "\nS/X/↓: rơi nhanh | Space: rơi tức thì | P: tạm dừng | Q/Esc: menu"
-    )
+    # Vẽ bàn chơi và thông tin, sau đó bọc toàn bộ bằng khung ngoài.
+    board_lines = [render_row(i) for i in range(H)]
+    status_lines = [
+        f"Độ khó: {difficulty} | Điểm: {score} | Level: {level}",
+        f"Hàng đã xóa: {total_lines} | Combo: {combo} | Tốc độ: {fall_delay:.2f}s/ô",
+    ]
     if paused:
-        status += "\n*** TẠM DỪNG *** | P: tiếp tục | Q/Esc: về menu"
-    sys.stdout.write("\033[H" + content + status + "\033[J")
+        status_lines.append("*** TẠM DỪNG *** | P: tiếp tục | Q/Esc: về menu")
+
+    # Khung ngoài bao cả bàn chơi lẫn phần trạng thái bên dưới.
+    frame_width = max(max(map(len, board_lines)), max(map(len, status_lines))) + 2
+    outer_top = "╔" + "═" * frame_width + "╗"
+    outer_bottom = "╚" + "═" * frame_width + "╝"
+    framed_lines = [outer_top]
+    framed_lines.extend("║" + line.ljust(frame_width) + "║" for line in board_lines)
+    framed_lines.append("║" + " " * frame_width + "║")
+    framed_lines.extend("║" + line.ljust(frame_width) + "║" for line in status_lines)
+    framed_lines.append(outer_bottom)
+    sys.stdout.write("\033[H" + "\n".join(framed_lines) + "\033[J")
     sys.stdout.flush()
 
 
@@ -344,36 +365,43 @@ def clear_screen():
 # JD05: MENU PLAY / DIFFICULTY / EXIT
 # ==========================================
 def show_menu():
-    """Trả về (tên độ khó, tốc độ rơi), hoặc None nếu chọn thoát."""
-    difficulty_index = 1  # Chọn NORMAL làm mặc định.
-    selected_index = 0     # Trỏ vào PLAY khi mở menu.
+    """Menu chính đóng khung; GUIDE chỉ mở khi chọn và nhấn Enter."""
+    difficulty_index = 1  # NORMAL mặc định.
+    selected_index = 0
+
+    menu_options = ["PLAY", "DIFFICULTY", "HIGH SCORES", "GUIDE", "EXIT"]
+    guide_items = GUIDE_ITEMS
 
     while True:
-        difficulty_name, fall_delay = DIFFICULTIES[difficulty_index]
-        options = ["PLAY", f"DIFFICULTY: {difficulty_name}", "EXIT"]
-        lines = [
-            "╔════════════════════════════════════╗",
-            "║              TETRIS                ║",
-            "╚════════════════════════════════════╝",
-            "",
+        difficulty_name, _fall_delay = DIFFICULTIES[difficulty_index]
+        width = 44
+        top = "╔" + "═" * (width - 2) + "╗"
+        bottom = "╚" + "═" * (width - 2) + "╝"
+        title = "║" + "TETRIS".center(width - 2) + "║"
+        inner_top = "╠" + "═" * (width - 2) + "╣"
+        inner_bottom = "╚" + "═" * (width - 2) + "╝"
+
+        body = [
+            "║" + "HIGHEST SCORE: 0".ljust(width - 2) + "║",
+            "║" + "".ljust(width - 2) + "║",
         ]
-        for index, option in enumerate(options):
-            cursor = "❯" if index == selected_index else " "
-            lines.append(f"  {cursor} {option}")
-        lines.extend([
-            "",
-            "W/S hoặc ↑/↓: chọn mục | Enter: xác nhận",
-            "A/D hoặc ←/→: đổi độ khó tại DIFFICULTY",
-            "Có thể bấm 1: PLAY, 2: đổi độ khó, 3: EXIT",
-        ])
+        for idx, option in enumerate(menu_options):
+            marker = "❯" if idx == selected_index else " "
+            label = f"DIFFICULTY: {difficulty_name}" if option == "DIFFICULTY" else option
+            body.append("║" + f"  {marker} {label}".ljust(width - 2) + "║")
+        body.append("║" + "".ljust(width - 2) + "║")
+        body.append("║" + "W/S or ↑/↓: Chọn mục | Enter: Xác nhận".ljust(width - 2) + "║")
+        body.append("║" + "A/D or ←/→: Thay đổi độ khó".ljust(width - 2) + "║")
+
+        menu_screen = [top, title, inner_top] + body + [bottom]
         clear_screen()
-        print("\n".join(lines), flush=True)
+        print("\n".join(menu_screen), flush=True)
 
         key = read_key()
         if key in ("up", "w"):
-            selected_index = (selected_index - 1) % len(options)
+            selected_index = (selected_index - 1) % len(menu_options)
         elif key in ("down", "s"):
-            selected_index = (selected_index + 1) % len(options)
+            selected_index = (selected_index + 1) % len(menu_options)
         elif key in ("left", "a") and selected_index == 1:
             difficulty_index = (difficulty_index - 1) % len(DIFFICULTIES)
         elif key in ("right", "d") and selected_index == 1:
@@ -386,11 +414,24 @@ def show_menu():
         elif key in ("3", "q", "esc"):
             return None
         elif key == "enter":
-            if selected_index == 0:
+            if selected_index == 0:  # PLAY
                 return DIFFICULTIES[difficulty_index]
-            if selected_index == 1:
+            elif selected_index == 1:  # DIFFICULTY
                 difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
-            else:
+            elif selected_index == 2:  # HIGH SCORES
+                clear_screen()
+                print("╔════════════════════════════════════════════╗\n║               HIGH SCORES                 ║\n╚════════════════════════════════════════════╝\n\nHigh scores are not saved yet.\n\nPress any key to return to menu.", flush=True)
+                read_key()
+            elif selected_index == 3:  # GUIDE
+                clear_screen()
+                guide_width = 54
+                guide_top = "╔" + "═" * (guide_width - 2) + "╗"
+                guide_bottom = "╚" + "═" * (guide_width - 2) + "╝"
+                guide_title = "║" + "GAME GUIDE".center(guide_width - 2) + "║"
+                guide_body = ["║" + line.ljust(guide_width - 2)[:guide_width - 2] + "║" for line in guide_items]
+                print("\n".join([guide_top, guide_title] + guide_body + [guide_bottom]), flush=True)
+                read_key()
+            else:  # EXIT
                 return None
 
 
@@ -454,19 +495,65 @@ def play_game(difficulty, base_fall_delay):
                     last_fall_time = time.monotonic() - fall_delay
                     needs_redraw = True
                 elif key == "p":
-                    # Giữ nguyên khối đang rơi và hiển thị trạng thái tạm dừng.
+                    # Tạm dừng: chỉ hiển thị menu Pause trên màn hình sạch,
+                    # không vẽ bàn chơi phía sau để tránh chồng giao diện.
                     current_block.to_board()
-                    draw_game(paused=True)
                     pause_start = time.monotonic()
-                    while True:
-                        pause_key = read_key()  # Đợi phím, không cập nhật game.
-                        if pause_key == "p":
-                            # Bù thời gian pause để khối không rơi bù khi tiếp tục.
-                            last_fall_time += time.monotonic() - pause_start
-                            needs_redraw = True
-                            break
-                        if pause_key in ("q", "esc"):
-                            return  # Thoát về menu ngay cả khi đang tạm dừng.
+                    pause_options = ["RESUME", "GUIDE", "EXIT"]
+                    pause_selected = 0
+                    pause_action = None
+
+                    menu_width = 30
+                    guide_width = 50
+
+                    while pause_action is None:
+                        clear_screen()
+                        menu_top = "╔" + "═" * (menu_width - 4) + "╗"
+                        menu_bottom = "╚" + "═" * (menu_width - 4) + "╝"
+                        menu_rows = [
+                            "║" + "PAUSED".center(menu_width - 4) + "║",
+                            "╠" + "═" * (menu_width - 4) + "╣",
+                        ]
+                        for idx, option in enumerate(pause_options):
+                            marker = "❯" if idx == pause_selected else " " 
+                            menu_rows.append("║" + f"  {marker} {option}".ljust(menu_width - 4) + "║")
+                        menu_rows.append(menu_bottom)
+                        status_rows = []
+                        print("\n".join([menu_top] + menu_rows + ["", *status_rows]), flush=True)
+
+                        pause_key = read_key()
+                        if pause_key in ("up", "w"):
+                            pause_selected = (pause_selected - 1) % len(pause_options)
+                        elif pause_key in ("down", "s"):
+                            pause_selected = (pause_selected + 1) % len(pause_options)
+                        elif pause_key in ("q", "esc"):
+                            pause_action = "EXIT"
+                        elif pause_key == "enter":
+                            pause_action = pause_options[pause_selected]
+
+                        if pause_action == "GUIDE":
+                            clear_screen()
+                            # Dùng đúng nội dung GUIDE_ITEMS của menu chính.
+                            guide_lines = GUIDE_ITEMS[:-1] + ["", "Nhấn phím bất kỳ để trở về Pause Menu."]
+                            guide_width = max(58, max(len(line) for line in guide_lines) + 4)
+                            guide_top = "╔" + "═" * (guide_width - 2) + "╗"
+                            guide_bottom = "╚" + "═" * (guide_width - 2) + "╝"
+                            guide_title = "║" + "GAME GUIDE".center(guide_width - 2) + "║"
+                            guide_body = [
+                                "║" + line.ljust(guide_width - 2) + "║"
+                                for line in guide_lines
+                            ]
+                            print("\n".join([guide_top, guide_title, *guide_body, guide_bottom]), flush=True)
+                            read_key()
+                            pause_action = None
+                            pause_selected = 1  # Focus lại GUIDE sau khi xem.
+                            continue
+
+                    if pause_action == "EXIT":
+                        return  # Về menu chính, kết thúc lượt chơi.
+                    else:  # RESUME
+                        last_fall_time += time.monotonic() - pause_start
+                        needs_redraw = True
                     current_block.del_from_board()
                 elif key in ("q", "esc"):
                     return  # Trở về menu chính.
