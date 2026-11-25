@@ -111,6 +111,16 @@ class Block:
     if self.can_move(0, 0, rotated):
       self.shape = rotated
 
+  def rotate_counterclockwise(self):
+    """Xoay khối 90 độ ngược chiều kim đồng hồ."""
+    size = len(self.shape)
+    rotated = [[" " for _ in range(size)] for _ in range(size)]
+    for i in range(size):
+      for j in range(size):
+        rotated[size - 1 - j][i] = self.shape[i][j]
+    if self.can_move(0, 0, rotated):
+      self.shape = rotated
+
 
 class BlockO(Block):
 
@@ -124,6 +134,9 @@ class BlockO(Block):
     ]
 
   def rotate(self):
+    pass
+
+  def rotate_counterclockwise(self):
     pass
 
 
@@ -155,6 +168,29 @@ class BlockI(Block):
             ]
 
         # Thử xoay tại chỗ; nếu sát tường thì thử nhích trái/phải 1-2 ô (Wall Kick)
+        for dx in (0, -1, 1, -2, 2):
+            if self.can_move(dx, 0, rotated):
+                self.x += dx
+                self.shape = rotated
+                self.is_vertical = not self.is_vertical
+                break
+
+    def rotate_counterclockwise(self):
+        # Khối I có hai trạng thái; xoay ngược cũng chuyển trạng thái tương tự.
+        if self.is_vertical:
+            rotated = [
+                [" ", " ", " ", " "],
+                ["I", "I", "I", "I"],
+                [" ", " ", " ", " "],
+                [" ", " ", " ", " "],
+            ]
+        else:
+            rotated = [
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+                [" ", "I", " ", " "],
+            ]
         for dx in (0, -1, 1, -2, 2):
             if self.can_move(dx, 0, rotated):
                 self.x += dx
@@ -243,8 +279,8 @@ def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False,
         f"\nĐộ khó: {difficulty} | Điểm: {score} | Level: {level}"
         f"\nHàng đã xóa: {total_lines} | Combo: {combo} "
         f"| Tốc độ: {fall_delay:.2f}s/ô"
-        "\nA/D hoặc ←/→: di chuyển | W hoặc ↑: xoay"
-        "\nS/X hoặc ↓: rơi nhanh | P: tạm dừng | Q/Esc: về menu"
+        "\nA/D hoặc ←/→: di chuyển | W/↑: xoay thuận | Z: xoay ngược"
+        "\nS/X/↓: rơi nhanh | Space: rơi tức thì | P: tạm dừng | Q/Esc: menu"
     )
     if paused:
         status += "\n*** TẠM DỪNG *** | P: tiếp tục | Q/Esc: về menu"
@@ -406,6 +442,16 @@ def play_game(difficulty, base_fall_delay):
                     needs_redraw = True
                 elif key in ("w", "up"):
                     current_block.rotate()
+                    needs_redraw = True
+                elif key == "z":
+                    current_block.rotate_counterclockwise()
+                    needs_redraw = True
+                elif key == " ":
+                    # Hard-drop: đưa khối xuống vị trí thấp nhất có thể.
+                    while current_block.can_move(0, 1):
+                        current_block.y += 1
+                    # Kích hoạt xử lý cố định khối ngay ở vòng lặp kế tiếp.
+                    last_fall_time = time.monotonic() - fall_delay
                     needs_redraw = True
                 elif key == "p":
                     # Giữ nguyên khối đang rơi và hiển thị trạng thái tạm dừng.
