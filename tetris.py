@@ -575,7 +575,7 @@ def play_game(difficulty, base_fall_delay):
                     if cleared > 0:
                         fall_delay = max(
                             MIN_FALL_DELAY,
-                            fall_delay * (0.9 ** cleared),
+                            fall_delay * (0.9797 ** cleared),
                         )
 
                     current_block = spawn_block()
