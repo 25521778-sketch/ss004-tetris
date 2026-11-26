@@ -374,26 +374,48 @@ def show_menu():
 
     while True:
         difficulty_name, _fall_delay = DIFFICULTIES[difficulty_index]
-        width = 44
+        width = 50
         top = "╔" + "═" * (width - 2) + "╗"
         bottom = "╚" + "═" * (width - 2) + "╝"
-        title = "║" + "TETRIS".center(width - 2) + "║"
+        title_art= [
+            "┌──────────────────┐",
+            "│      TETRIS      │",
+            "└──────┐    ┌──────┘",
+            "│    │",
+            "└────┘"
+        ]
+        title_lines = [
+            "║" + line.center(width - 2) + "║"
+            for line in title_art
+        ]
         inner_top = "╠" + "═" * (width - 2) + "╣"
         inner_bottom = "╚" + "═" * (width - 2) + "╝"
 
         body = [
-            "║" + "HIGHEST SCORE: 0".ljust(width - 2) + "║",
-            "║" + "".ljust(width - 2) + "║",
+            "║" + " " * (width - 2) + "║"
+            for _ in range(2)
         ]
+        box_width = width - 8
         for idx, option in enumerate(menu_options):
             marker = "❯" if idx == selected_index else " "
             label = f"DIFFICULTY: {difficulty_name}" if option == "DIFFICULTY" else option
-            body.append("║" + f"  {marker} {label}".ljust(width - 2) + "║")
-        body.append("║" + "".ljust(width - 2) + "║")
+            content = f"{marker} {label}"
+            if idx == selected_index:
+                # Vẽ khung bao quanh mục đang chọn
+                body.append("║" + "  ┌" + "─" * (box_width - 2) + "┐" + "  "*2 + "║")
+                body.append("║" + "  │" + content.ljust(box_width - 2) + "│" + "  "*2 + "║")
+                body.append("║" + "  └" + "─" * (box_width - 2) + "┘" + "  "*2 + "║")
+            else:
+                # Mục không được chọn
+                body.append("║" + ("    " + content).ljust(width - 2) + "║")
+            # Tạo khoảng cách giữa các lựa chọn
+            for _ in range(2):
+                body.append("║" + " " * (width - 2) + "║")
+
         body.append("║" + "W/S or ↑/↓: Chọn mục | Enter: Xác nhận".ljust(width - 2) + "║")
         body.append("║" + "A/D or ←/→: Thay đổi độ khó".ljust(width - 2) + "║")
 
-        menu_screen = [top, title, inner_top] + body + [bottom]
+        menu_screen = [top] + title_lines + [inner_top] + body + [bottom]
         clear_screen()
         print("\n".join(menu_screen), flush=True)
 
