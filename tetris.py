@@ -281,161 +281,103 @@ class GameStats:
 # ==========================================
 # JD01: LỚP CHA VÀ CÁC LỚP KHỐI KẾ THỪA
 # ==========================================
-class Block:
+def matrix(*rows):
+    return [list(row) for row in rows]
 
-    def __init__(self, x=5, y=1):
-        self.x = x
-        self.y = y
-        self.shape = []
+
+class Block:
+    def __init__(self, x=5, y=1, shape=None):
+        self.x, self.y, self.shape = x, y, shape or []
 
     def can_move(self, dx, dy, target_shape=None):
-        matrix = target_shape if target_shape is not None else self.shape
-        size = len(matrix)
-        for i in range(size):
-            for j in range(size):
-                if matrix[i][j] != " ":
-                    xt = self.x + j + dx
-                    yt = self.y + i + dy
-                    if xt < 1 or xt >= W - 1 or yt >= H - 1:
-                        return False
-                    if board[yt][xt] != " ":
-                        return False
-        return True
+        shape = target_shape or self.shape
+        return all(
+            1 <= self.x + j + dx < W - 1
+            and self.y + i + dy < H - 1
+            and board[self.y + i + dy][self.x + j + dx] == " "
+            for i, row in enumerate(shape) for j, cell in enumerate(row) if cell != " "
+        )
+
+    def _put(self, value):
+        for i, row in enumerate(self.shape):
+            for j, cell in enumerate(row):
+                if cell != " ":
+                    board[self.y + i][self.x + j] = value
 
     def to_board(self):
-        size = len(self.shape)
-        for i in range(size):
-            for j in range(size):
-                if self.shape[i][j] != " ":
-                    board[self.y + i][self.x + j] = self.shape[i][j]
+        for i, row in enumerate(self.shape):
+            for j, cell in enumerate(row):
+                if cell != " ":
+                    board[self.y + i][self.x + j] = cell
 
     def del_from_board(self):
-        size = len(self.shape)
-        for i in range(size):
-            for j in range(size):
-                if self.shape[i][j] != " ":
-                    board[self.y + i][self.x + j] = " "
+        self._put(" ")
 
-    def rotate(self):
-        """Phương thức xoay mặc định 90 độ theo chiều kim đồng hồ."""
-        size = len(self.shape)
-        rotated = [[" " for _ in range(size)] for _ in range(size)]
-        for i in range(size):
-            for j in range(size):
-                rotated[j][size - 1 - i] = self.shape[i][j]
-
+    def rotate(self, clockwise=True):
+        rotated = [list(row) for row in (zip(*self.shape[::-1]) if clockwise else zip(*self.shape[::-1]))]
+        if not clockwise:
+            rotated = [list(row) for row in zip(*self.shape)][::-1]
         if self.can_move(0, 0, rotated):
             self.shape = rotated
 
     def rotate_counterclockwise(self):
-        """Xoay khối 90 độ ngược chiều kim đồng hồ."""
-        size = len(self.shape)
-        rotated = [[" " for _ in range(size)] for _ in range(size)]
-        for i in range(size):
-            for j in range(size):
-                rotated[size - 1 - j][i] = self.shape[i][j]
-        if self.can_move(0, 0, rotated):
-            self.shape = rotated
+        self.rotate(False)
 
 
 class BlockO(Block):
-
     def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [
-            [" ", " ", " ", " "],
-            [" ", "O", "O", " "],
-            [" ", "O", "O", " "],
-            [" ", " ", " ", " "],
-        ]
+        super().__init__(x, y, matrix("    ", " OO ", " OO ", "    "))
 
-    def rotate(self):
+    def rotate(self, clockwise=True):
         pass
 
-    def rotate_counterclockwise(self):
-        pass
+    rotate_counterclockwise = rotate
 
 
 class BlockI(Block):
-
     def __init__(self, x=5, y=1):
-        super().__init__(x, y)
+        super().__init__(x, y, matrix(" I  ", " I  ", " I  ", " I  "))
         self.is_vertical = True
-        self.shape = [
-            [" ", "I", " ", " "],
-            [" ", "I", " ", " "],
-            [" ", "I", " ", " "],
-            [" ", "I", " ", " "],
-        ]
 
-    def rotate(self):
-        if self.is_vertical:
-            rotated = [
-                [" ", " ", " ", " "],
-                ["I", "I", "I", "I"],
-                [" ", " ", " ", " "],
-                [" ", " ", " ", " "],
-            ]
-        else:
-            rotated = [
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-            ]
-
-        # Thử xoay tại chỗ; nếu sát tường thì thử nhích trái/phải 1-2 ô (Wall Kick).
+    def rotate(self, clockwise=True):
+        rotated = matrix("    ", "IIII", "    ", "    ") if self.is_vertical else matrix(" I  ", " I  ", " I  ", " I  ")
         for dx in (0, -1, 1, -2, 2):
             if self.can_move(dx, 0, rotated):
                 self.x += dx
-                self.shape = rotated
-                self.is_vertical = not self.is_vertical
+                self.shape, self.is_vertical = rotated, not self.is_vertical
                 break
 
-    def rotate_counterclockwise(self):
-        # Khối I có hai trạng thái; xoay ngược cũng chuyển trạng thái tương tự.
-        self.rotate()
+    rotate_counterclockwise = rotate
 
 
+# Các khối còn lại dùng chung cách xoay và kiểm tra va chạm của lớp Block.
 class BlockT(Block):
-
     def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [[" ", "T", " "], ["T", "T", "T"], [" ", " ", " "]]
+        super().__init__(x, y, matrix(" T ", "TTT", "   "))
 
 
 class BlockS(Block):
-
     def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [[" ", "S", "S"], ["S", "S", " "], [" ", " ", " "]]
+        super().__init__(x, y, matrix(" SS", "SS ", "   "))
 
 
 class BlockZ(Block):
-
     def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [["Z", "Z", " "], [" ", "Z", "Z"], [" ", " ", " "]]
+        super().__init__(x, y, matrix("ZZ ", " ZZ", "   "))
 
 
 class BlockJ(Block):
-
     def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [["J", " ", " "], ["J", "J", "J"], [" ", " ", " "]]
+        super().__init__(x, y, matrix("J  ", "JJJ", "   "))
 
 
 class BlockL(Block):
-
     def __init__(self, x=5, y=1):
-        super().__init__(x, y)
-        self.shape = [[" ", " ", "L"], ["L", "L", "L"], [" ", " ", " "]]
+        super().__init__(x, y, matrix("  L", "LLL", "   "))
 
 
 def spawn_block():
-    block_classes = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
-    chosen_class = random.choice(block_classes)
-    return chosen_class(x=5, y=1)
+    return random.choice((BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL))(5, 1)
 
 
 # ==========================================
@@ -443,11 +385,7 @@ def spawn_block():
 # ==========================================
 def init_board():
     for i in range(H):
-        for j in range(W):
-            if i == 0 or i == H - 1 or j == 0 or j == W - 1:
-                board[i][j] = "#"
-            else:
-                board[i][j] = " "
+        board[i] = ["#" if i in (0, H - 1) or j in (0, W - 1) else " " for j in range(W)]
 
 
 # ==========================================
@@ -586,12 +524,7 @@ def read_key():
     # Phím mũi tên trả về 2 byte, cần đọc byte thứ hai.
     if key in (b"\x00", b"\xe0"):
         second = msvcrt.getch()
-        return {
-            b"H": "up",
-            b"P": "down",
-            b"K": "left",
-            b"M": "right",
-        }.get(second, "unknown")
+        return {b"H": "up", b"P": "down", b"K": "left", b"M": "right"}.get(second, "unknown")
     if key == b"\r":
         return "enter"
     if key == b"\x1b":
