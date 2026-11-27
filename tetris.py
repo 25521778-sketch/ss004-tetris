@@ -6,6 +6,7 @@ import random
 import shutil
 import sys
 import time
+import re
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
@@ -213,7 +214,7 @@ def render_frame(lines):
     """Vẽ từng dòng theo tọa độ tuyệt đối (row, 1), không dùng ký tự xuống dòng để không cuộn."""
     term_cols, term_rows = get_terminal_size()
     max_cols = max(1, term_cols - 1)  # Chừa 1 cột cuối để không kích hoạt wrap-scroll.
-    frame_width = max((len(line) for line in lines), default=UI_WIDTH)
+    frame_width = max((visible_len(line) for line in lines), default=UI_WIDTH)
     frame_height = len(lines)
 
     display_lines = list(lines)
@@ -234,19 +235,23 @@ def render_frame(lines):
     # Ghi từng dòng bằng mã định vị tuyệt đối ESC[row;1H (không chứa ký tự xuống dòng).
     chunks = []
     for row_idx in range(1, term_rows + 1):
-        text = display_lines[row_idx - 1][:max_cols] if row_idx <= len(display_lines) else ""
+        if row_idx <= len(display_lines):
+            line = display_lines[row_idx - 1]
+            text = slice_ansi(line, 0, max_cols) if visible_len(line) > max_cols else line
+        else:
+            text = ""
         chunks.append(f"\033[{row_idx};1H{text}\033[K")
     sys.stdout.write("".join(chunks))
     sys.stdout.flush()
 
 
 def compose_overlay(base_lines, panel_lines):
-    """Chồng bảng nổi (Pause/Guide/Game Over) vào giữa khung nền rồi vẽ 1 lần, tránh nháy."""
+    """Chồng bảng nổi (Pause/Guide/Game Over) vào giữa khung nền mà không vỡ màu ANSI."""
     merged = list(base_lines)
     base_height = len(merged)
-    base_width = max((len(line) for line in merged), default=UI_WIDTH)
+    base_width = max((visible_len(line) for line in merged), default=UI_WIDTH)
     panel_height = len(panel_lines)
-    panel_width = max((len(line) for line in panel_lines), default=0)
+    panel_width = max((visible_len(line) for line in panel_lines), default=0)
     canvas_width = max(base_width, panel_width)
 
     start_row = max(0, (base_height - panel_height) // 2)
@@ -255,11 +260,13 @@ def compose_overlay(base_lines, panel_lines):
     for offset, panel_line in enumerate(panel_lines):
         target_row = start_row + offset
         if target_row >= base_height:
-            merged.append(panel_line.center(canvas_width))
+            merged.append(pad_ansi(panel_line, canvas_width, align="center"))
             continue
-        bg = merged[target_row].ljust(canvas_width)
-        end_col = start_col + len(panel_line)
-        merged[target_row] = bg[:start_col] + panel_line + bg[end_col:]
+        bg = pad_ansi(merged[target_row], canvas_width, align="left")
+        end_col = start_col + visible_len(panel_line)
+        left_bg = slice_ansi(bg, 0, start_col)
+        right_bg = slice_ansi(bg, end_col)
+        merged[target_row] = left_bg + panel_line + right_bg
     return merged
 
 
@@ -401,58 +408,8 @@ def _render_frame_win32(lines, term_cols, term_rows):
         sys.stdout.flush()
 
 
-def render_frame(lines):
-    """Vẽ từng dòng theo tọa độ tuyệt đối (row, 1), không dùng ký tự xuống dòng để không cuộn."""
-    term_cols, term_rows = get_terminal_size()
-    max_cols = max(1, term_cols - 1)  # Chừa 1 cột cuối để không kích hoạt wrap-scroll.
-    frame_width = max((len(line) for line in lines), default=UI_WIDTH)
-    frame_height = len(lines)
-
-    display_lines = list(lines)
-    if term_rows < frame_height or term_cols < frame_width:
-        warning = (
-            f"[!] Terminal quá nhỏ ({term_cols}x{term_rows}), "
-            f"cần >= {frame_width}x{frame_height}. Kéo rộng thêm!"
-        )
-        if term_rows >= 1:
-            if len(display_lines) < term_rows:
-                display_lines.extend([""] * (term_rows - len(display_lines)))
-            display_lines[term_rows - 1] = warning[:max_cols]
-
-    if not ANSI_ENABLED:
-        _render_frame_win32(display_lines, term_cols, term_rows)
-        return
-
-    # Ghi từng dòng bằng mã định vị tuyệt đối ESC[row;1H (không chứa ký tự xuống dòng).
-    chunks = []
-    for row_idx in range(1, term_rows + 1):
-        text = display_lines[row_idx - 1][:max_cols] if row_idx <= len(display_lines) else ""
-        chunks.append(f"\033[{row_idx};1H{text}\033[K")
-    sys.stdout.write("".join(chunks))
-    sys.stdout.flush()
 
 
-def compose_overlay(base_lines, panel_lines):
-    """Chồng bảng nổi (Pause/Guide/Game Over) vào giữa khung nền rồi vẽ 1 lần, tránh nháy."""
-    merged = list(base_lines)
-    base_height = len(merged)
-    base_width = max((len(line) for line in merged), default=UI_WIDTH)
-    panel_height = len(panel_lines)
-    panel_width = max((len(line) for line in panel_lines), default=0)
-    canvas_width = max(base_width, panel_width)
-
-    start_row = max(0, (base_height - panel_height) // 2)
-    start_col = max(0, (canvas_width - panel_width) // 2)
-
-    for offset, panel_line in enumerate(panel_lines):
-        target_row = start_row + offset
-        if target_row >= base_height:
-            merged.append(panel_line.center(canvas_width))
-            continue
-        bg = merged[target_row].ljust(canvas_width)
-        end_col = start_col + len(panel_line)
-        merged[target_row] = bg[:start_col] + panel_line + bg[end_col:]
-    return merged
 
 
 class GameStats:
@@ -680,6 +637,18 @@ CELL_GHOST = "░░"
 CELL_EMPTY = "  "
 
 
+RESET_COLOR = "\033[0m"
+BLOCK_COLORS = {
+    "I": "\033[96m",          # Xanh lơ (Cyan)
+    "O": "\033[93m",          # Vàng sáng (Yellow)
+    "T": "\033[95m",          # Tím (Magenta)
+    "S": "\033[92m",          # Xanh lá (Green)
+    "Z": "\033[91m",          # Đỏ (Red)
+    "J": "\033[94m",          # Xanh dương (Blue)
+    "L": "\033[38;5;208m",    # Cam (Orange - chuẩn 256 màu)
+    ".": "\033[90m",          # Xám tối cho bóng mờ (Ghost)
+}
+
 def render_board_row(i):
     """Vẽ một dòng của khung bàn chơi (viền đơn để phân tách với khung ngoài viền đôi)."""
     board_inner_w = 2 * (W - 2)
@@ -693,10 +662,11 @@ def render_board_row(i):
         val = board[i][j]
         if val == " ":
             row_cells.append(CELL_EMPTY)
-        elif val == ".":  # Đảm bảo khớp với ghost_char trong hàm ghost_to_board()
-            row_cells.append(CELL_GHOST)
+        elif val == ".":
+            row_cells.append(f"{BLOCK_COLORS['.']}{CELL_GHOST}{RESET_COLOR}")
         else:
-            row_cells.append(CELL_BLOCK)
+            color = BLOCK_COLORS.get(val, "")
+            row_cells.append(f"{color}{CELL_BLOCK}{RESET_COLOR}" if color else CELL_BLOCK)
 
     return "│" + "".join(row_cells) + "│"
 
@@ -719,7 +689,7 @@ def build_stats_box(total_lines, fall_delay, difficulty, paused, score, level, c
     ]
 
 def build_next_box(next_block):
-    """Tạo khung Next Block và căn giữa hình khối kế tiếp."""
+    """Tạo khung Next Block và tô màu chuẩn cho hình khối kế tiếp."""
     w = SIDE_PANEL_INNER_W
     box = [
         "┌" + "─" * w + "┐",
@@ -728,15 +698,21 @@ def build_next_box(next_block):
     ]
     shape = next_block.shape
     for row in shape:
-        cells = "".join("██" if cell != " " else "  " for cell in row)
-        box.append("│" + cells.center(w) + "│")
+        cells = []
+        for cell in row:
+            if cell != " ":
+                color = BLOCK_COLORS.get(cell, "")
+                cells.append(f"{color}{CELL_BLOCK}{RESET_COLOR}" if color else CELL_BLOCK)
+            else:
+                cells.append("  ")
+        box.append("│" + pad_ansi("".join(cells), w, align="center") + "│")
     box.append("└" + "─" * w + "┘")
     return box
 
 
 def build_game_frame(total_lines=0, fall_delay=1.5, difficulty="NORMAL",
                      paused=False, score=0, level=1, combo=0, next_block=None):
-    """Tạo màn chơi với Next Block phía trên bảng thông số."""
+    """Tạo màn chơi với Next Block phía trên bảng thông số (hỗ trợ màu ANSI)."""
     outer_inner_w = UI_WIDTH - 2
     stats_box = build_stats_box(
         total_lines, fall_delay, difficulty, paused, score, level, combo
@@ -750,9 +726,11 @@ def build_game_frame(total_lines=0, fall_delay=1.5, difficulty="NORMAL",
         left_part = render_board_row(i)
         right_part = side_box[i] if i < len(side_box) else " " * side_box_w
         content = f"  {left_part}  {right_part}  "
-        lines.append("║" + content.ljust(outer_inner_w)[:outer_inner_w] + "║")
+        lines.append("║" + pad_ansi(content, outer_inner_w, align="left") + "║")
     lines.append("╚" + "═" * outer_inner_w + "╝")
     return lines
+
+
 def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False,
          score=0, level=1, combo=0, next_block=None, overlay=None):
     """Vẽ màn chơi tại tọa độ cố định (1, 1); hỗ trợ ghép bảng nổi không nháy."""
@@ -771,19 +749,53 @@ def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False,
     render_frame(frame)
 
 
+ANSI_RE = re.compile(r"\033\[[0-9;]*m")
+
+
+def visible_len(text):
+    """Đếm số ô hiển thị thực tế trên terminal (bỏ qua mã màu ANSI)."""
+    return len(ANSI_RE.sub("", text))
+
+
+def pad_ansi(text, width, align="left"):
+    """Căn lề chuỗi có chứa mã màu ANSI theo đúng độ rộng hiển thị."""
+    pad = max(0, width - visible_len(text))
+    if align == "center":
+        left = pad // 2
+        return " " * left + text + " " * (pad - left)
+    return text + " " * pad
+
+def slice_ansi(text, start, end=None):
+    """Cắt chuỗi theo vị trí cột hiển thị thực tế mà không làm đứt mã màu ANSI."""
+    out = []
+    col = 0
+    i = 0
+    n = len(text)
+    while i < n:
+        m = ANSI_RE.match(text, i)
+        if m:
+            if col >= start and (end is None or col < end):
+                out.append(m.group(0))
+            i = m.end()
+            continue
+        if col >= start and (end is None or col < end):
+            out.append(text[i])
+        col += 1
+        i += 1
+    out.append(RESET_COLOR)
+    return "".join(out)
+
 def make_panel(title, body_lines, width=UI_WIDTH, body_align="center", height=None):
-    """Tạo bảng nổi hoặc màn hình con; nếu truyền height thì tự căn chiều cao đồng bộ."""
+    """Tạo bảng nổi hoặc màn hình con; hỗ trợ chuỗi có mã màu ANSI."""
     inner = width - 2
     formatted_body = []
     for line in body_lines:
-        line = line[:inner]
-        if body_align == "left":
-            formatted_body.append("║" + line.ljust(inner) + "║")
-        else:
-            formatted_body.append("║" + line.center(inner) + "║")
+        if visible_len(line) == len(line):
+            line = line[:inner]
+        aligned = pad_ansi(line, inner, align=body_align)
+        formatted_body.append("║" + aligned + "║")
 
     if height is not None:
-        # 4 dòng cố định: top, title, separator, bottom.
         target_body_rows = max(len(formatted_body), height - 4)
         extra = target_body_rows - len(formatted_body)
         top_pad = extra // 2
@@ -793,7 +805,7 @@ def make_panel(title, body_lines, width=UI_WIDTH, body_align="center", height=No
 
     lines = [
         "╔" + "═" * inner + "╗",
-        "║" + title.center(inner) + "║",
+        "║" + pad_ansi(title, inner, align="center") + "║",
         "╠" + "═" * inner + "╣",
     ]
     lines.extend(formatted_body)
