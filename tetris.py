@@ -288,6 +288,7 @@ def matrix(*rows):
 class Block:
     def __init__(self, x=5, y=1, shape=None):
         self.x, self.y, self.shape = x, y, shape or []
+        self._ghost_cells = []
 
     def can_move(self, dx, dy, target_shape=None):
         shape = target_shape or self.shape
@@ -322,6 +323,37 @@ class Block:
 
     def rotate_counterclockwise(self):
         self.rotate(False)
+
+    def get_ghost_y(self):
+        """Tìm hàng y thấp nhất mà khối hiện tại có thể rơi tới."""
+        dy = 0
+        while self.can_move(0, dy + 1):
+          dy += 1
+        return self.y + dy
+    
+    def ghost_to_board(self, ghost_char="."):
+        """Vẽ bóng mờ lên board và lưu lại tọa độ để xóa chính xác."""
+        self.del_ghost_from_board()
+        ghost_y = self.get_ghost_y()
+        if ghost_y == self.y:
+            return
+
+        size = len(self.shape)
+        for i in range(size):
+            for j in range(size):
+                if self.shape[i][j] != " ":
+                    gx = self.x + j
+                    gy = ghost_y + i
+                    if 1 <= gx < W - 1 and 1 <= gy < H - 1 and board[gy][gx] == " ":
+                        board[gy][gx] = ghost_char
+                        self._ghost_cells.append((gy, gx))
+
+    def del_ghost_from_board(self, ghost_char="."):
+        """Xóa đúng các ô bóng mờ đã vẽ ở frame trước."""
+        for gy, gx in getattr(self, "_ghost_cells", []):
+            if board[gy][gx] == ghost_char:
+                board[gy][gx] = " "
+        self._ghost_cells = []
 
 
 class BlockO(Block):
@@ -392,6 +424,7 @@ def init_board():
 # JD04: KHUNG NGOÀI ĐỒNG BỘ & Ô VUÔNG VỨC
 # ==========================================
 CELL_BLOCK = "██"
+CELL_GHOST = "░░"  
 CELL_EMPTY = "  "
 
 
@@ -402,11 +435,18 @@ def render_board_row(i):
         return "┌" + "─" * board_inner_w + "┐"
     if i == H - 1:
         return "└" + "─" * board_inner_w + "┘"
-    cells = "".join(
-        CELL_EMPTY if board[i][j] == " " else CELL_BLOCK
-        for j in range(1, W - 1)
-    )
-    return "│" + cells + "│"
+
+    row_cells = []
+    for j in range(1, W - 1):
+        val = board[i][j]
+        if val == " ":
+            row_cells.append(CELL_EMPTY)
+        elif val == ".":  # Đảm bảo khớp với ghost_char trong hàm ghost_to_board()
+            row_cells.append(CELL_GHOST)
+        else:
+            row_cells.append(CELL_BLOCK)
+
+    return "│" + "".join(row_cells) + "│"
 
 
 def build_stats_box(total_lines, fall_delay, difficulty, paused, score, level, combo):
@@ -719,6 +759,7 @@ def play_game(difficulty, base_fall_delay):
         show_game_over()
         return
 
+    current_block.ghost_to_board()
     current_block.to_board()
     draw_game()
 
@@ -729,7 +770,9 @@ def play_game(difficulty, base_fall_delay):
             last_term_size = current_term_size
             needs_redraw = True
 
+        # Xóa khối thật TRƯỚC, xóa bóng mờ SAU
         current_block.del_from_board()
+        current_block.del_ghost_from_board()
 
         # Đọc phím thường xuyên, độc lập với đồng hồ rơi tự động.
         while msvcrt.kbhit():
@@ -757,7 +800,8 @@ def play_game(difficulty, base_fall_delay):
                 # Kích hoạt xử lý cố định khối ngay ở vòng lặp kế tiếp.
                 last_fall_time = time.monotonic() - fall_delay
                 needs_redraw = True
-            elif key in ("p","esc"):
+            elif key in ("p", "esc"):
+                current_block.ghost_to_board()
                 current_block.to_board()
                 pause_start = time.monotonic()
                 pause_options = ["RESUME", "GUIDE", "EXIT"]
@@ -819,6 +863,7 @@ def play_game(difficulty, base_fall_delay):
                     return  # Về menu chính, kết thúc lượt chơi.
                 last_fall_time += time.monotonic() - pause_start
                 current_block.del_from_board()
+                current_block.del_ghost_from_board()
                 needs_redraw = True
             elif key in ("q", "esc"):
                 return  # Trở về menu chính.
@@ -848,6 +893,8 @@ def play_game(difficulty, base_fall_delay):
                     show_game_over()
                     return
 
+        # Vẽ bóng mờ TRƯỚC, vẽ khối thật đè lên SAU
+        current_block.ghost_to_board()
         current_block.to_board()
         if needs_redraw:
             draw_game()
