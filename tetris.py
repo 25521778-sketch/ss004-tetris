@@ -1,17 +1,22 @@
+import ctypes
+from ctypes import wintypes
 import os
 import random
+import shutil
 import sys
 import time
-sys.stdout.reconfigure(encoding='utf-8')
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 # Trò chơi sử dụng msvcrt để đọc bàn phím không cần nhấn Enter trên Windows.
 try:
-  import msvcrt
+    import msvcrt
 except ImportError:
-  print("Mã nguồn này yêu cầu Windows để chạy thư viện msvcrt.")
-  sys.exit()
+    print("Mã nguồn này yêu cầu Windows để chạy thư viện msvcrt.")
+    sys.exit()
 
-H = 20
+H = 24  # Chiều cao bàn chơi (22 hàng chơi + 2 hàng viền).
 W = 15
 board = [[" " for _ in range(W)] for _ in range(H)]
 
@@ -22,6 +27,11 @@ DIFFICULTIES = [
     ("HARD", 0.2),
 ]
 MIN_FALL_DELAY = 0.08  # JD03: Không để tốc độ rơi tăng vô hạn.
+
+# Kích thước khung ngoài thống nhất cho cả Menu chính và Màn chơi.
+UI_WIDTH = 66
+UI_HEIGHT = H + 2  # 26 dòng (gồm viền ngoài trên/dưới + 24 dòng nội dung).
+SIDE_PANEL_INNER_W = 28  # Chiều rộng nội dung bảng thông số bên phải.
 
 # Nội dung Guide dùng chung cho menu chính và Pause Menu.
 GUIDE_ITEMS = [
@@ -41,6 +51,198 @@ GUIDE_ITEMS = [
 LINE_CLEAR_POINTS = {1: 100, 2: 300, 3: 500, 4: 800}
 COMBO_BONUS = 50
 LINES_PER_LEVEL = 10
+
+
+# ==========================================
+# HỖ TRỢ ANSI, ALTERNATE SCREEN & VẼ KHÔNG CUỘN
+# ==========================================
+ANSI_ENABLED = False
+_WIN32_HANDLE = None
+
+
+class _COORD(ctypes.Structure):
+    _fields_ = [("X", wintypes.SHORT), ("Y", wintypes.SHORT)]
+
+
+class _SMALL_RECT(ctypes.Structure):
+    _fields_ = [
+        ("Left", wintypes.SHORT),
+        ("Top", wintypes.SHORT),
+        ("Right", wintypes.SHORT),
+        ("Bottom", wintypes.SHORT),
+    ]
+
+
+class _CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", _COORD),
+        ("dwCursorPosition", _COORD),
+        ("wAttributes", wintypes.WORD),
+        ("srWindow", _SMALL_RECT),
+        ("dwMaximumWindowSize", _COORD),
+    ]
+
+
+def enable_windows_ansi():
+    """Kích hoạt Virtual Terminal (ANSI) trên Windows Console bằng Win32 API."""
+    global ANSI_ENABLED, _WIN32_HANDLE
+
+    if os.name != "nt":
+        ANSI_ENABLED = True
+        return True
+
+    # Hỗ trợ các terminal Unix-like trên Windows (Git Bash / mintty / WT / VS Code).
+    env_ansi = bool(
+        os.environ.get("WT_SESSION")
+        or os.environ.get("TERM_PROGRAM")
+        or os.environ.get("TERM")
+    )
+
+    try:
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+        kernel32.GetStdHandle.restype = wintypes.HANDLE
+        kernel32.GetConsoleMode.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.GetConsoleMode.restype = wintypes.BOOL
+        kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.SetConsoleMode.restype = wintypes.BOOL
+
+        STD_OUTPUT_HANDLE = wintypes.DWORD(-11)
+        ENABLE_PROCESSED_OUTPUT = 0x0001
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+
+        handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+        _WIN32_HANDLE = handle
+        mode = wintypes.DWORD()
+        if handle and kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            new_mode = (
+                mode.value
+                | ENABLE_PROCESSED_OUTPUT
+                | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            )
+            if kernel32.SetConsoleMode(handle, new_mode):
+                ANSI_ENABLED = True
+                return True
+    except Exception:
+        pass
+
+    # Dự phòng: kích hoạt qua shell mặc định nếu terminal hỗ trợ.
+    os.system("")
+    ANSI_ENABLED = env_ansi
+    return ANSI_ENABLED
+
+
+def enter_screen_mode():
+    """Vào Alternate Screen Buffer, tắt auto-wrap và ẩn con trỏ để chống cuộn."""
+    if ANSI_ENABLED:
+        # ?1049h: mở màn hình phụ (không có thanh cuộn lịch sử)
+        # ?7l   : tắt tự động xuống dòng khi chạm mép phải
+        # ?25l  : ẩn con trỏ nhấp nháy
+        sys.stdout.write("\033[?1049h\033[?7l\033[?25l\033[2J\033[1;1H")
+        sys.stdout.flush()
+    else:
+        os.system("cls" if os.name == "nt" else "clear")
+
+
+def exit_screen_mode():
+    """Khôi phục lại màn hình terminal gốc khi thoát trò chơi."""
+    if ANSI_ENABLED:
+        sys.stdout.write("\033[?7h\033[?25h\033[?1049l")
+        sys.stdout.flush()
+
+
+def get_terminal_size():
+    size = shutil.get_terminal_size(fallback=(80, 28))
+    return size.columns, size.lines
+
+
+def _render_frame_win32(lines, term_cols, term_rows):
+    """Fallback dùng Win32 API ghi đè trực tiếp lên viewport nếu không có ANSI."""
+    try:
+        kernel32 = ctypes.windll.kernel32
+        csbi = _CONSOLE_SCREEN_BUFFER_INFO()
+        if not _WIN32_HANDLE or not kernel32.GetConsoleScreenBufferInfo(
+            _WIN32_HANDLE, ctypes.byref(csbi)
+        ):
+            raise OSError("No console buffer")
+
+        top_y = csbi.srWindow.Top
+        max_cols = max(1, term_cols - 1)
+        written = wintypes.DWORD()
+        for idx in range(term_rows):
+            text = lines[idx][:max_cols] if idx < len(lines) else ""
+            padded = text.ljust(max_cols)
+            kernel32.SetConsoleCursorPosition(
+                _WIN32_HANDLE, _COORD(0, top_y + idx)
+            )
+            kernel32.WriteConsoleW(
+                _WIN32_HANDLE, padded, len(padded), ctypes.byref(written), None
+            )
+        return
+    except Exception:
+        os.system("cls" if os.name == "nt" else "clear")
+        max_cols = max(1, term_cols - 1)
+        sys.stdout.write(
+            "\n".join(line[:max_cols] for line in lines[: max(1, term_rows - 1)])
+        )
+        sys.stdout.flush()
+
+
+def render_frame(lines):
+    """Vẽ từng dòng theo tọa độ tuyệt đối (row, 1), không dùng ký tự xuống dòng để không cuộn."""
+    term_cols, term_rows = get_terminal_size()
+    max_cols = max(1, term_cols - 1)  # Chừa 1 cột cuối để không kích hoạt wrap-scroll.
+    frame_width = max((len(line) for line in lines), default=UI_WIDTH)
+    frame_height = len(lines)
+
+    display_lines = list(lines)
+    if term_rows < frame_height or term_cols < frame_width:
+        warning = (
+            f"[!] Terminal quá nhỏ ({term_cols}x{term_rows}), "
+            f"cần >= {frame_width}x{frame_height}. Kéo rộng thêm!"
+        )
+        if term_rows >= 1:
+            if len(display_lines) < term_rows:
+                display_lines.extend([""] * (term_rows - len(display_lines)))
+            display_lines[term_rows - 1] = warning[:max_cols]
+
+    if not ANSI_ENABLED:
+        _render_frame_win32(display_lines, term_cols, term_rows)
+        return
+
+    # Ghi từng dòng bằng mã định vị tuyệt đối ESC[row;1H (không chứa ký tự xuống dòng).
+    chunks = []
+    for row_idx in range(1, term_rows + 1):
+        text = display_lines[row_idx - 1][:max_cols] if row_idx <= len(display_lines) else ""
+        chunks.append(f"\033[{row_idx};1H{text}\033[K")
+    sys.stdout.write("".join(chunks))
+    sys.stdout.flush()
+
+
+def compose_overlay(base_lines, panel_lines):
+    """Chồng bảng nổi (Pause/Guide/Game Over) vào giữa khung nền rồi vẽ 1 lần, tránh nháy."""
+    merged = list(base_lines)
+    base_height = len(merged)
+    base_width = max((len(line) for line in merged), default=UI_WIDTH)
+    panel_height = len(panel_lines)
+    panel_width = max((len(line) for line in panel_lines), default=0)
+    canvas_width = max(base_width, panel_width)
+
+    start_row = max(0, (base_height - panel_height) // 2)
+    start_col = max(0, (canvas_width - panel_width) // 2)
+
+    for offset, panel_line in enumerate(panel_lines):
+        target_row = start_row + offset
+        if target_row >= base_height:
+            merged.append(panel_line.center(canvas_width))
+            continue
+        bg = merged[target_row].ljust(canvas_width)
+        end_col = start_col + len(panel_line)
+        merged[target_row] = bg[:start_col] + panel_line + bg[end_col:]
+    return merged
 
 
 class GameStats:
@@ -79,179 +281,103 @@ class GameStats:
 # ==========================================
 # JD01: LỚP CHA VÀ CÁC LỚP KHỐI KẾ THỪA
 # ==========================================
+def matrix(*rows):
+    return [list(row) for row in rows]
+
+
 class Block:
+    def __init__(self, x=5, y=1, shape=None):
+        self.x, self.y, self.shape = x, y, shape or []
 
-  def __init__(self, x=5, y=1):
-    self.x = x
-    self.y = y
-    self.shape = []
+    def can_move(self, dx, dy, target_shape=None):
+        shape = target_shape or self.shape
+        return all(
+            1 <= self.x + j + dx < W - 1
+            and self.y + i + dy < H - 1
+            and board[self.y + i + dy][self.x + j + dx] == " "
+            for i, row in enumerate(shape) for j, cell in enumerate(row) if cell != " "
+        )
 
-  def can_move(self, dx, dy, target_shape=None):
-    matrix = target_shape if target_shape is not None else self.shape
-    size = len(matrix)
-    for i in range(size):
-      for j in range(size):
-        if matrix[i][j] != " ":
-          xt = self.x + j + dx
-          yt = self.y + i + dy
-          if xt < 1 or xt >= W - 1 or yt >= H - 1:
-            return False
-          if board[yt][xt] != " ":
-            return False
-    return True
+    def _put(self, value):
+        for i, row in enumerate(self.shape):
+            for j, cell in enumerate(row):
+                if cell != " ":
+                    board[self.y + i][self.x + j] = value
 
-  def to_board(self):
-    size = len(self.shape)
-    for i in range(size):
-      for j in range(size):
-        if self.shape[i][j] != " ":
-          board[self.y + i][self.x + j] = self.shape[i][j]
+    def to_board(self):
+        for i, row in enumerate(self.shape):
+            for j, cell in enumerate(row):
+                if cell != " ":
+                    board[self.y + i][self.x + j] = cell
 
-  def del_from_board(self):
-    size = len(self.shape)
-    for i in range(size):
-      for j in range(size):
-        if self.shape[i][j] != " ":
-          board[self.y + i][self.x + j] = " "
+    def del_from_board(self):
+        self._put(" ")
 
-  def rotate(self):
-    """Phương thức xoay mặc định 90 độ theo chiều kim đồng hồ"""
-    size = len(self.shape)
-    rotated = [[" " for _ in range(size)] for _ in range(size)]
-    for i in range(size):
-      for j in range(size):
-        rotated[j][size - 1 - i] = self.shape[i][j]
+    def rotate(self, clockwise=True):
+        rotated = [list(row) for row in (zip(*self.shape[::-1]) if clockwise else zip(*self.shape[::-1]))]
+        if not clockwise:
+            rotated = [list(row) for row in zip(*self.shape)][::-1]
+        if self.can_move(0, 0, rotated):
+            self.shape = rotated
 
-    if self.can_move(0, 0, rotated):
-      self.shape = rotated
-
-  def rotate_counterclockwise(self):
-    """Xoay khối 90 độ ngược chiều kim đồng hồ."""
-    size = len(self.shape)
-    rotated = [[" " for _ in range(size)] for _ in range(size)]
-    for i in range(size):
-      for j in range(size):
-        rotated[size - 1 - j][i] = self.shape[i][j]
-    if self.can_move(0, 0, rotated):
-      self.shape = rotated
+    def rotate_counterclockwise(self):
+        self.rotate(False)
 
 
 class BlockO(Block):
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y, matrix("    ", " OO ", " OO ", "    "))
 
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [
-        [" ", " ", " ", " "],
-        [" ", "O", "O", " "],
-        [" ", "O", "O", " "],
-        [" ", " ", " ", " "],
-    ]
+    def rotate(self, clockwise=True):
+        pass
 
-  def rotate(self):
-    pass
-
-  def rotate_counterclockwise(self):
-    pass
+    rotate_counterclockwise = rotate
 
 
 class BlockI(Block):
     def __init__(self, x=5, y=1):
-        super().__init__(x, y)
+        super().__init__(x, y, matrix(" I  ", " I  ", " I  ", " I  "))
         self.is_vertical = True
-        self.shape = [
-            [" ", "I", " ", " "],
-            [" ", "I", " ", " "],
-            [" ", "I", " ", " "],
-            [" ", "I", " ", " "],
-        ]
 
-    def rotate(self):
-        if self.is_vertical:
-            rotated = [
-                [" ", " ", " ", " "],
-                ["I", "I", "I", "I"],
-                [" ", " ", " ", " "],
-                [" ", " ", " ", " "],
-            ]
-        else:
-            rotated = [
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-            ]
-
-        # Thử xoay tại chỗ; nếu sát tường thì thử nhích trái/phải 1-2 ô (Wall Kick)
+    def rotate(self, clockwise=True):
+        rotated = matrix("    ", "IIII", "    ", "    ") if self.is_vertical else matrix(" I  ", " I  ", " I  ", " I  ")
         for dx in (0, -1, 1, -2, 2):
             if self.can_move(dx, 0, rotated):
                 self.x += dx
-                self.shape = rotated
-                self.is_vertical = not self.is_vertical
+                self.shape, self.is_vertical = rotated, not self.is_vertical
                 break
 
-    def rotate_counterclockwise(self):
-        # Khối I có hai trạng thái; xoay ngược cũng chuyển trạng thái tương tự.
-        if self.is_vertical:
-            rotated = [
-                [" ", " ", " ", " "],
-                ["I", "I", "I", "I"],
-                [" ", " ", " ", " "],
-                [" ", " ", " ", " "],
-            ]
-        else:
-            rotated = [
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-                [" ", "I", " ", " "],
-            ]
-        for dx in (0, -1, 1, -2, 2):
-            if self.can_move(dx, 0, rotated):
-                self.x += dx
-                self.shape = rotated
-                self.is_vertical = not self.is_vertical
-                break
+    rotate_counterclockwise = rotate
 
 
+# Các khối còn lại dùng chung cách xoay và kiểm tra va chạm của lớp Block.
 class BlockT(Block):
-
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [[" ", "T", " "], ["T", "T", "T"], [" ", " ", " "]]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y, matrix(" T ", "TTT", "   "))
 
 
 class BlockS(Block):
-
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [[" ", "S", "S"], ["S", "S", " "], [" ", " ", " "]]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y, matrix(" SS", "SS ", "   "))
 
 
 class BlockZ(Block):
-
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [["Z", "Z", " "], [" ", "Z", "Z"], [" ", " ", " "]]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y, matrix("ZZ ", " ZZ", "   "))
 
 
 class BlockJ(Block):
-
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [["J", " ", " "], ["J", "J", "J"], [" ", " ", " "]]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y, matrix("J  ", "JJJ", "   "))
 
 
 class BlockL(Block):
-
-  def __init__(self, x=5, y=1):
-    super().__init__(x, y)
-    self.shape = [[" ", " ", "L"], ["L", "L", "L"], [" ", " ", " "]]
+    def __init__(self, x=5, y=1):
+        super().__init__(x, y, matrix("  L", "LLL", "   "))
 
 
 def spawn_block():
-  block_classes = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
-  chosen_class = random.choice(block_classes)
-  return chosen_class(x=5, y=1)
+    return random.choice((BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL))(5, 1)
 
 
 # ==========================================
@@ -259,54 +385,112 @@ def spawn_block():
 # ==========================================
 def init_board():
     for i in range(H):
-        for j in range(W):
-            if i == 0 or i == H - 1 or j == 0 or j == W - 1:
-                board[i][j] = "#"
-            else:
-                board[i][j] = " "
+        board[i] = ["#" if i in (0, H - 1) or j in (0, W - 1) else " " for j in range(W)]
 
 
 # ==========================================
-# JD04: VIỀN VÀ CÁC Ô VUÔNG VỨC
+# JD04: KHUNG NGOÀI ĐỒNG BỘ & Ô VUÔNG VỨC
 # ==========================================
 CELL_BLOCK = "██"
 CELL_EMPTY = "  "
 
 
-def render_row(i):
+def render_board_row(i):
+    """Vẽ một dòng của khung bàn chơi (viền đơn để phân tách với khung ngoài viền đôi)."""
+    board_inner_w = 2 * (W - 2)
     if i == 0:
-        return "╔" + "══" * (W - 2) + "╗"
+        return "┌" + "─" * board_inner_w + "┐"
     if i == H - 1:
-        return "╚" + "══" * (W - 2) + "╝"
+        return "└" + "─" * board_inner_w + "┘"
     cells = "".join(
         CELL_EMPTY if board[i][j] == " " else CELL_BLOCK
         for j in range(1, W - 1)
     )
-    return "║" + cells + "║"
+    return "│" + cells + "│"
+
+
+def build_stats_box(total_lines, fall_delay, difficulty, paused, score, level, combo):
+    """Tạo khung thông số bên phải (không còn bảng điều khiển phía dưới)."""
+    w = SIDE_PANEL_INNER_W
+    status_badge = "*** TẠM DỪNG ***" if paused else ""
+    return [
+        "┌" + "─" * w + "┐",
+        "│" + "TETRIS".center(w) + "│",
+        "├" + "─" * w + "┤",
+        "│" + f"  Độ khó     : {difficulty}".ljust(w) + "│",
+        "│" + f"  Điểm       : {score}".ljust(w) + "│",
+        "│" + f"  Level      : {level}".ljust(w) + "│",
+        "│" + f"  Hàng đã xóa: {total_lines}".ljust(w) + "│",
+        "│" + f"  Combo      : {combo}".ljust(w) + "│",
+        "│" + status_badge.center(w) + "│",
+        "└" + "─" * w + "┘",
+    ]
+
+
+def build_game_frame(total_lines=0, fall_delay=1.5, difficulty="NORMAL",
+                     paused=False, score=0, level=1, combo=0):
+    """Tạo màn chơi có khung bao ngoài cố định UI_WIDTH x UI_HEIGHT, đồng bộ với Menu."""
+    outer_inner_w = UI_WIDTH - 2
+    stats_box = build_stats_box(
+        total_lines, fall_delay, difficulty, paused, score, level, combo
+    )
+    stats_box_w = SIDE_PANEL_INNER_W + 2  # Gồm 2 ký tự viền trái/phải.
+
+    lines = ["╔" + "═" * outer_inner_w + "╗"]
+    for i in range(H):
+        left_part = render_board_row(i)
+        right_part = stats_box[i] if i < len(stats_box) else " " * stats_box_w
+        content = f"  {left_part}  {right_part}  "
+        lines.append("║" + content.ljust(outer_inner_w)[:outer_inner_w] + "║")
+    lines.append("╚" + "═" * outer_inner_w + "╝")
+    return lines
 
 
 def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False,
-         score=0, level=1, combo=0):
-    # Vẽ bàn chơi và thông tin, sau đó bọc toàn bộ bằng khung ngoài.
-    board_lines = [render_row(i) for i in range(H)]
-    status_lines = [
-        f"Độ khó: {difficulty} | Điểm: {score} | Level: {level}",
-        f"Hàng đã xóa: {total_lines} | Combo: {combo} | Tốc độ: {fall_delay:.2f}s/ô",
-    ]
-    if paused:
-        status_lines.append("*** TẠM DỪNG *** | P: tiếp tục | Q/Esc: về menu")
+         score=0, level=1, combo=0, overlay=None):
+    """Vẽ màn chơi tại tọa độ cố định (1, 1); hỗ trợ ghép bảng nổi không nháy."""
+    frame = build_game_frame(
+        total_lines=total_lines,
+        fall_delay=fall_delay,
+        difficulty=difficulty,
+        paused=paused,
+        score=score,
+        level=level,
+        combo=combo,
+    )
+    if overlay is not None:
+        frame = compose_overlay(frame, overlay)
+    render_frame(frame)
 
-    # Khung ngoài bao cả bàn chơi lẫn phần trạng thái bên dưới.
-    frame_width = max(max(map(len, board_lines)), max(map(len, status_lines))) + 2
-    outer_top = "╔" + "═" * frame_width + "╗"
-    outer_bottom = "╚" + "═" * frame_width + "╝"
-    framed_lines = [outer_top]
-    framed_lines.extend("║" + line.ljust(frame_width) + "║" for line in board_lines)
-    framed_lines.append("║" + " " * frame_width + "║")
-    framed_lines.extend("║" + line.ljust(frame_width) + "║" for line in status_lines)
-    framed_lines.append(outer_bottom)
-    sys.stdout.write("\033[H" + "\n".join(framed_lines) + "\033[J")
-    sys.stdout.flush()
+
+def make_panel(title, body_lines, width=UI_WIDTH, body_align="center", height=None):
+    """Tạo bảng nổi hoặc màn hình con; nếu truyền height thì tự căn chiều cao đồng bộ."""
+    inner = width - 2
+    formatted_body = []
+    for line in body_lines:
+        line = line[:inner]
+        if body_align == "left":
+            formatted_body.append("║" + line.ljust(inner) + "║")
+        else:
+            formatted_body.append("║" + line.center(inner) + "║")
+
+    if height is not None:
+        # 4 dòng cố định: top, title, separator, bottom.
+        target_body_rows = max(len(formatted_body), height - 4)
+        extra = target_body_rows - len(formatted_body)
+        top_pad = extra // 2
+        bottom_pad = extra - top_pad
+        blank_row = "║" + " " * inner + "║"
+        formatted_body = [blank_row] * top_pad + formatted_body + [blank_row] * bottom_pad
+
+    lines = [
+        "╔" + "═" * inner + "╗",
+        "║" + title.center(inner) + "║",
+        "╠" + "═" * inner + "╣",
+    ]
+    lines.extend(formatted_body)
+    lines.append("╚" + "═" * inner + "╝")
+    return lines
 
 
 # ==========================================
@@ -340,12 +524,7 @@ def read_key():
     # Phím mũi tên trả về 2 byte, cần đọc byte thứ hai.
     if key in (b"\x00", b"\xe0"):
         second = msvcrt.getch()
-        return {
-            b"H": "up",
-            b"P": "down",
-            b"K": "left",
-            b"M": "right",
-        }.get(second, "unknown")
+        return {b"H": "up", b"P": "down", b"K": "left", b"M": "right"}.get(second, "unknown")
     if key == b"\r":
         return "enter"
     if key == b"\x1b":
@@ -356,70 +535,85 @@ def read_key():
         return "unknown"
 
 
-def clear_screen():
-    sys.stdout.write("\033[2J\033[H")
-    sys.stdout.flush()
+def wait_key_with_resize(redraw_callback):
+    """Chờ người dùng nhấn phím, tự động vẽ lại nếu cửa sổ terminal đổi kích thước."""
+    last_size = get_terminal_size()
+    while True:
+        if msvcrt.kbhit():
+            return read_key()
+        current_size = get_terminal_size()
+        if current_size != last_size:
+            last_size = current_size
+            redraw_callback()
+        time.sleep(0.03)
 
 
 # ==========================================
-# JD05: MENU PLAY / DIFFICULTY / EXIT
+# JD05: MENU CHÍNH ĐỒNG BỘ UI_WIDTH x UI_HEIGHT
 # ==========================================
+def build_menu_frame(menu_options, selected_index, difficulty_name):
+    """Tạo khung menu chính có đúng kích thước UI_WIDTH x UI_HEIGHT như màn chơi."""
+    inner = UI_WIDTH - 2
+    blank_row = "║" + " " * inner + "║"
+    top = "╔" + "═" * inner + "╗"
+    bottom = "╚" + "═" * inner + "╝"
+    inner_top = "╠" + "═" * inner + "╣"
+
+    title_art = [
+        "┌──────────────────┐",
+        "│      TETRIS      │",
+        "└──────┐    ┌──────┘",
+        "│    │",
+        "└────┘",
+    ]
+    header = [top, blank_row]
+    header.extend("║" + line.center(inner) + "║" for line in title_art)
+    header.extend([blank_row, inner_top])
+
+    box_width = inner - 6  # Chừa lề 3 trái, 3 phải.
+    option_rows = []
+    for idx, option in enumerate(menu_options):
+        marker = ">" if idx == selected_index else " "
+        label = f"DIFFICULTY: {difficulty_name}" if option == "DIFFICULTY" else option
+        content = f" {marker} {label}"
+        if idx == selected_index:
+            option_rows.append("║" + "   ┌" + "─" * (box_width - 2) + "┐   " + "║")
+            option_rows.append("║" + "   │" + content.ljust(box_width - 2) + "│   " + "║")
+            option_rows.append("║" + "   └" + "─" * (box_width - 2) + "┘   " + "║")
+        else:
+            option_rows.append("║" + ("    " + content).ljust(inner) + "║")
+        if idx < len(menu_options) - 1:
+            option_rows.append(blank_row)
+
+    footer = [
+        "║" + "W/S hoặc ↑/↓: Chọn mục  |  Enter: Xác nhận".center(inner) + "║",
+        "║" + "A/D hoặc ←/→: Thay đổi độ khó".center(inner) + "║",
+        bottom,
+    ]
+
+    # Căn giữa khối lựa chọn theo chiều dọc để tổng chiều cao luôn đúng bằng UI_HEIGHT.
+    remaining = UI_HEIGHT - len(header) - len(option_rows) - len(footer)
+    top_pad = max(0, remaining // 2)
+    bottom_pad = max(0, remaining - top_pad)
+
+    return header + [blank_row] * top_pad + option_rows + [blank_row] * bottom_pad + footer
+
+
 def show_menu():
     """Menu chính đóng khung; GUIDE chỉ mở khi chọn và nhấn Enter."""
     difficulty_index = 1  # NORMAL mặc định.
     selected_index = 0
-
     menu_options = ["PLAY", "DIFFICULTY", "HIGH SCORES", "GUIDE", "EXIT"]
-    guide_items = GUIDE_ITEMS
 
     while True:
         difficulty_name, _fall_delay = DIFFICULTIES[difficulty_index]
-        width = 50
-        top = "╔" + "═" * (width - 2) + "╗"
-        bottom = "╚" + "═" * (width - 2) + "╝"
-        title_art= [
-            "┌──────────────────┐",
-            "│      TETRIS      │",
-            "└──────┐    ┌──────┘",
-            "│    │",
-            "└────┘"
-        ]
-        title_lines = [
-            "║" + line.center(width - 2) + "║"
-            for line in title_art
-        ]
-        inner_top = "╠" + "═" * (width - 2) + "╣"
-        inner_bottom = "╚" + "═" * (width - 2) + "╝"
 
-        body = [
-            "║" + " " * (width - 2) + "║"
-            for _ in range(2)
-        ]
-        box_width = width - 8
-        for idx, option in enumerate(menu_options):
-            marker = "❯" if idx == selected_index else " "
-            label = f"DIFFICULTY: {difficulty_name}" if option == "DIFFICULTY" else option
-            content = f"{marker} {label}"
-            if idx == selected_index:
-                # Vẽ khung bao quanh mục đang chọn
-                body.append("║" + "  ┌" + "─" * (box_width - 2) + "┐" + "  "*2 + "║")
-                body.append("║" + "  │" + content.ljust(box_width - 2) + "│" + "  "*2 + "║")
-                body.append("║" + "  └" + "─" * (box_width - 2) + "┘" + "  "*2 + "║")
-            else:
-                # Mục không được chọn
-                body.append("║" + ("    " + content).ljust(width - 2) + "║")
-            # Tạo khoảng cách giữa các lựa chọn
-            for _ in range(2):
-                body.append("║" + " " * (width - 2) + "║")
+        def redraw_menu():
+            render_frame(build_menu_frame(menu_options, selected_index, difficulty_name))
 
-        body.append("║" + "W/S or ↑/↓: Chọn mục | Enter: Xác nhận".ljust(width - 2) + "║")
-        body.append("║" + "A/D or ←/→: Thay đổi độ khó".ljust(width - 2) + "║")
+        redraw_menu()
+        key = wait_key_with_resize(redraw_menu)
 
-        menu_screen = [top] + title_lines + [inner_top] + body + [bottom]
-        clear_screen()
-        print("\n".join(menu_screen), flush=True)
-
-        key = read_key()
         if key in ("up", "w"):
             selected_index = (selected_index - 1) % len(menu_options)
         elif key in ("down", "s"):
@@ -428,31 +622,38 @@ def show_menu():
             difficulty_index = (difficulty_index - 1) % len(DIFFICULTIES)
         elif key in ("right", "d") and selected_index == 1:
             difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
-        elif key == "2":
-            selected_index = 1
-            difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
-        elif key == "1":
-            return DIFFICULTIES[difficulty_index]
-        elif key in ("3", "q", "esc"):
-            return None
         elif key == "enter":
             if selected_index == 0:  # PLAY
                 return DIFFICULTIES[difficulty_index]
-            elif selected_index == 1:  # DIFFICULTY
+            elif selected_index == 1:  # DIFFICULTY1
                 difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
             elif selected_index == 2:  # HIGH SCORES
-                clear_screen()
-                print("╔════════════════════════════════════════════╗\n║               HIGH SCORES                 ║\n╚════════════════════════════════════════════╝\n\nHigh scores are not saved yet.\n\nPress any key to return to menu.", flush=True)
-                read_key()
+                panel = make_panel(
+                    "HIGH SCORES",
+                    [
+                        "Chưa có điểm cao được lưu.",
+                        "",
+                        "Nhấn phím bất kỳ để quay lại Menu.",
+                    ],
+                    width=UI_WIDTH,
+                    height=UI_HEIGHT,
+                )
+                render_frame(panel)
+                wait_key_with_resize(lambda: render_frame(panel))
             elif selected_index == 3:  # GUIDE
-                clear_screen()
-                guide_width = 54
-                guide_top = "╔" + "═" * (guide_width - 2) + "╗"
-                guide_bottom = "╚" + "═" * (guide_width - 2) + "╝"
-                guide_title = "║" + "GAME GUIDE".center(guide_width - 2) + "║"
-                guide_body = ["║" + line.ljust(guide_width - 2)[:guide_width - 2] + "║" for line in guide_items]
-                print("\n".join([guide_top, guide_title] + guide_body + [guide_bottom]), flush=True)
-                read_key()
+                guide_lines = ["  " + item if item else "" for item in GUIDE_ITEMS[:-1]] + [
+                    "",
+                    "  Nhấn phím bất kỳ để quay lại Menu.",
+                ]
+                panel = make_panel(
+                    "GAME GUIDE",
+                    guide_lines,
+                    width=UI_WIDTH,
+                    body_align="left",
+                    height=UI_HEIGHT,
+                )
+                render_frame(panel)
+                wait_key_with_resize(lambda: render_frame(panel))
             else:  # EXIT
                 return None
 
@@ -466,163 +667,179 @@ def play_game(difficulty, base_fall_delay):
     fall_delay = base_fall_delay
     stats = GameStats()
     last_fall_time = time.monotonic()
+    last_term_size = get_terminal_size()
 
-    def draw_game(paused=False):
-        draw(stats.total_lines, fall_delay, difficulty, paused=paused,
-             score=stats.score, level=stats.level, combo=stats.combo)
+    def draw_game(paused=False, overlay=None):
+        draw(
+            stats.total_lines,
+            fall_delay,
+            difficulty,
+            paused=paused,
+            score=stats.score,
+            level=stats.level,
+            combo=stats.combo,
+            overlay=overlay,
+        )
 
-    clear_screen()
-    sys.stdout.write("\033[?25l")  # Ẩn con trỏ trong lúc chơi.
-    sys.stdout.flush()
+    def show_game_over():
+        panel = make_panel(
+            "GAME OVER",
+            [
+                "",
+                f"Điểm cuối cùng: {stats.score}",
+                f"Hàng đã xóa: {stats.total_lines} | Level: {stats.level}",
+                "",
+                "Nhấn phím bất kỳ để về menu.",
+            ],
+            width=46,
+        )
+        draw_game(overlay=panel)
+        wait_key_with_resize(lambda: draw_game(overlay=panel))
 
-    try:
-        if not current_block.can_move(0, 0):
-            # Trường hợp không còn chỗ đặt khối đầu tiên.
-            draw_game()
-            print("\nGAME OVER! Nhấn phím bất kỳ để về menu.", flush=True)
-            read_key()
-            return
+    if not current_block.can_move(0, 0):
+        show_game_over()
+        return
+
+    current_block.to_board()
+    draw_game()
+
+    while True:
+        needs_redraw = False
+        current_term_size = get_terminal_size()
+        if current_term_size != last_term_size:
+            last_term_size = current_term_size
+            needs_redraw = True
+
+        current_block.del_from_board()
+
+        # Đọc phím thường xuyên, độc lập với đồng hồ rơi tự động.
+        while msvcrt.kbhit():
+            key = read_key()
+            if key in ("a", "left") and current_block.can_move(-1, 0):
+                current_block.x -= 1
+                needs_redraw = True
+            elif key in ("d", "right") and current_block.can_move(1, 0):
+                current_block.x += 1
+                needs_redraw = True
+            elif key in ("s", "x", "down") and current_block.can_move(0, 1):
+                current_block.y += 1
+                last_fall_time = time.monotonic()
+                needs_redraw = True
+            elif key in ("w", "up"):
+                current_block.rotate()
+                needs_redraw = True
+            elif key == "z":
+                current_block.rotate_counterclockwise()
+                needs_redraw = True
+            elif key == " ":
+                # Hard-drop: đưa khối xuống vị trí thấp nhất có thể.
+                while current_block.can_move(0, 1):
+                    current_block.y += 1
+                # Kích hoạt xử lý cố định khối ngay ở vòng lặp kế tiếp.
+                last_fall_time = time.monotonic() - fall_delay
+                needs_redraw = True
+            elif key in ("p","esc"):
+                current_block.to_board()
+                pause_start = time.monotonic()
+                pause_options = ["RESUME", "GUIDE", "EXIT"]
+                pause_selected = 0
+                pause_action = None
+
+                while pause_action is None:
+                    panel_w = 46
+                    inner_w = panel_w - 2
+                    opt_box_w = inner_w - 6
+                    pause_body = [""]
+                    for idx, option in enumerate(pause_options):
+                        if idx == pause_selected:
+                            pause_body.extend([
+                                "   ┌" + "─" * (opt_box_w - 2) + "┐",
+                                "   │" + f" > {option}".ljust(opt_box_w - 2) + "│",
+                                "   └" + "─" * (opt_box_w - 2) + "┘",
+                            ])
+                        else:
+                            pause_body.append(f"      {option}")
+                    pause_body.append("")
+                    pause_body.append("W/S hoặc ↑/↓: Chọn | Enter: Xác nhận".center(inner_w))
+                    pause_panel = make_panel(
+                        "PAUSED", pause_body, width=panel_w, body_align="left"
+                    )
+
+                    def redraw_pause():
+                        draw_game(paused=True, overlay=pause_panel)
+
+                    redraw_pause()
+                    pause_key = wait_key_with_resize(redraw_pause)
+                    if pause_key in ("up", "w"):
+                        pause_selected = (pause_selected - 1) % len(pause_options)
+                    elif pause_key in ("down", "s"):
+                        pause_selected = (pause_selected + 1) % len(pause_options)
+                    elif pause_key in ("q", "esc"):
+                        pause_action = "EXIT"
+                    elif pause_key in ("p", "esc"):
+                        pause_action = "RESUME"
+                    elif pause_key == "enter":
+                        pause_action = pause_options[pause_selected]
+
+                    if pause_action == "GUIDE":
+                        guide_lines = ["  " + item if item else "" for item in GUIDE_ITEMS[:-1]] + [
+                            "",
+                            "  Nhấn phím bất kỳ để quay lại Pause Menu.",
+                        ]
+                        guide_panel = make_panel(
+                            "GAME GUIDE", guide_lines, width=54, body_align="left"
+                        )
+                        draw_game(paused=True, overlay=guide_panel)
+                        wait_key_with_resize(
+                            lambda: draw_game(paused=True, overlay=guide_panel)
+                        )
+                        pause_action = None
+                        pause_selected = 1
+
+                if pause_action == "EXIT":
+                    return  # Về menu chính, kết thúc lượt chơi.
+                last_fall_time += time.monotonic() - pause_start
+                current_block.del_from_board()
+                needs_redraw = True
+            elif key in ("q", "esc"):
+                return  # Trở về menu chính.
+
+        now = time.monotonic()
+        if now - last_fall_time >= fall_delay:
+            last_fall_time = now
+            needs_redraw = True
+            if current_block.can_move(0, 1):
+                current_block.y += 1
+            else:
+                # Cố định khối trước khi xóa hàng (JD02).
+                current_block.to_board()
+                cleared = remove_line()
+                stats.record_lock(cleared)
+
+                # JD03: Giữ cơ chế cũ: xóa càng nhiều hàng, rơi càng nhanh.
+                if cleared > 0:
+                    fall_delay = max(
+                        MIN_FALL_DELAY,
+                        fall_delay * (0.9797 ** cleared),
+                    )
+
+                current_block = spawn_block()
+                if not current_block.can_move(0, 0):
+                    show_game_over()
+                    return
 
         current_block.to_board()
-        draw_game()
-
-        while True:
-            needs_redraw = False
-            current_block.del_from_board()
-
-            # Đọc phím thường xuyên, độc lập với đồng hồ rơi tự động.
-            while msvcrt.kbhit():
-                key = read_key()
-                if key in ("a", "left") and current_block.can_move(-1, 0):
-                    current_block.x -= 1
-                    needs_redraw = True
-                elif key in ("d", "right") and current_block.can_move(1, 0):
-                    current_block.x += 1
-                    needs_redraw = True
-                elif key in ("s", "x", "down") and current_block.can_move(0, 1):
-                    current_block.y += 1
-                    last_fall_time = time.monotonic()
-                    needs_redraw = True
-                elif key in ("w", "up"):
-                    current_block.rotate()
-                    needs_redraw = True
-                elif key == "z":
-                    current_block.rotate_counterclockwise()
-                    needs_redraw = True
-                elif key == " ":
-                    # Hard-drop: đưa khối xuống vị trí thấp nhất có thể.
-                    while current_block.can_move(0, 1):
-                        current_block.y += 1
-                    # Kích hoạt xử lý cố định khối ngay ở vòng lặp kế tiếp.
-                    last_fall_time = time.monotonic() - fall_delay
-                    needs_redraw = True
-                elif key == "p":
-                    # Tạm dừng: chỉ hiển thị menu Pause trên màn hình sạch,
-                    # không vẽ bàn chơi phía sau để tránh chồng giao diện.
-                    current_block.to_board()
-                    pause_start = time.monotonic()
-                    pause_options = ["RESUME", "GUIDE", "EXIT"]
-                    pause_selected = 0
-                    pause_action = None
-
-                    menu_width = 30
-                    guide_width = 50
-
-                    while pause_action is None:
-                        clear_screen()
-                        menu_top = "╔" + "═" * (menu_width - 4) + "╗"
-                        menu_bottom = "╚" + "═" * (menu_width - 4) + "╝"
-                        menu_rows = [
-                            "║" + "PAUSED".center(menu_width - 4) + "║",
-                            "╠" + "═" * (menu_width - 4) + "╣",
-                        ]
-                        for idx, option in enumerate(pause_options):
-                            marker = "❯" if idx == pause_selected else " " 
-                            menu_rows.append("║" + f"  {marker} {option}".ljust(menu_width - 4) + "║")
-                        menu_rows.append(menu_bottom)
-                        status_rows = []
-                        print("\n".join([menu_top] + menu_rows + ["", *status_rows]), flush=True)
-
-                        pause_key = read_key()
-                        if pause_key in ("up", "w"):
-                            pause_selected = (pause_selected - 1) % len(pause_options)
-                        elif pause_key in ("down", "s"):
-                            pause_selected = (pause_selected + 1) % len(pause_options)
-                        elif pause_key in ("q", "esc"):
-                            pause_action = "EXIT"
-                        elif pause_key == "enter":
-                            pause_action = pause_options[pause_selected]
-
-                        if pause_action == "GUIDE":
-                            clear_screen()
-                            # Dùng đúng nội dung GUIDE_ITEMS của menu chính.
-                            guide_lines = GUIDE_ITEMS[:-1] + ["", "Nhấn phím bất kỳ để trở về Pause Menu."]
-                            guide_width = max(58, max(len(line) for line in guide_lines) + 4)
-                            guide_top = "╔" + "═" * (guide_width - 2) + "╗"
-                            guide_bottom = "╚" + "═" * (guide_width - 2) + "╝"
-                            guide_title = "║" + "GAME GUIDE".center(guide_width - 2) + "║"
-                            guide_body = [
-                                "║" + line.ljust(guide_width - 2) + "║"
-                                for line in guide_lines
-                            ]
-                            print("\n".join([guide_top, guide_title, *guide_body, guide_bottom]), flush=True)
-                            read_key()
-                            pause_action = None
-                            pause_selected = 1  # Focus lại GUIDE sau khi xem.
-                            continue
-
-                    if pause_action == "EXIT":
-                        return  # Về menu chính, kết thúc lượt chơi.
-                    else:  # RESUME
-                        last_fall_time += time.monotonic() - pause_start
-                        needs_redraw = True
-                    current_block.del_from_board()
-                elif key in ("q", "esc"):
-                    return  # Trở về menu chính.
-
-            now = time.monotonic()
-            if now - last_fall_time >= fall_delay:
-                last_fall_time = now
-                needs_redraw = True
-                if current_block.can_move(0, 1):
-                    current_block.y += 1
-                else:
-                    # Cố định khối trước khi xóa hàng (JD02).
-                    current_block.to_board()
-                    cleared = remove_line()
-                    stats.record_lock(cleared)
-
-                    # JD03: Giữ cơ chế cũ: xóa càng nhiều hàng, rơi càng nhanh.
-                    # Level tăng sau mỗi 10 hàng và nhân điểm theo bảng quy định.
-                    if cleared > 0:
-                        fall_delay = max(
-                            MIN_FALL_DELAY,
-                            fall_delay * (0.9797 ** cleared),
-                        )
-
-                    current_block = spawn_block()
-                    # Kiểm tra ngay tại vị trí sinh khối, tránh ghi đè gạch cũ.
-                    if not current_block.can_move(0, 0):
-                        draw_game()
-                        print("\nGAME OVER! Nhấn phím bất kỳ để về menu.", flush=True)
-                        read_key()
-                        return
-
-            current_block.to_board()
-            if needs_redraw:
-                draw_game()
-            time.sleep(0.01)
-    finally:
-        sys.stdout.write("\033[?25h")  # Hiện con trỏ khi rời màn chơi.
-        sys.stdout.flush()
+        if needs_redraw:
+            draw_game()
+        time.sleep(0.01)
 
 
 def main():
     random.seed()
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
-    # Kích hoạt khả năng xử lý mã ANSI trên Windows Console nếu được hỗ trợ.
-    os.system("")
+    enable_windows_ansi()
+    enter_screen_mode()
 
     try:
         while True:
@@ -634,8 +851,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        sys.stdout.write("\033[?25h\n")
-        sys.stdout.flush()
+        exit_screen_mode()
 
 
 if __name__ == "__main__":
