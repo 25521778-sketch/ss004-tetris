@@ -1,6 +1,7 @@
 import ctypes
 from ctypes import wintypes
 import os
+import json
 import random
 import shutil
 import sys
@@ -44,6 +45,15 @@ GUIDE_ITEMS = [
     "P             : Tạm dừng / tiếp tục",
     "Q / ESC       : Về menu",
     "",
+    "CÁCH TÍNH ĐIỂM:",
+    "Hard-drop: +2 điểm / ô rơi tức thì bằng SPACE",
+    "Điểm dọn hàng cơ bản: Single 100 | Double 300 ",
+    "                      Triple 500 | Tetris 800 ",
+    "Điểm dọn hàng = điểm dọn hàng cơ bản x Level",
+    "Điểm Combo: 50 x số Combo x Level",
+    "Điểm lượt xóa = điểm dọn hàng + điểm Combo",
+    "Level tăng mỗi 10 hàng; xóa hàng dùng Level trước lượt.",
+    "",
     "Nhấn phím bất kỳ để trở về.",
 ]
 
@@ -51,6 +61,200 @@ GUIDE_ITEMS = [
 LINE_CLEAR_POINTS = {1: 100, 2: 300, 3: 500, 4: 800}
 COMBO_BONUS = 50
 LINES_PER_LEVEL = 10
+HIGH_SCORE_FILE = "high_scores.json"
+MAX_HIGH_SCORES = 10
+
+
+# ==========================================
+# HỖ TRỢ ANSI, ALTERNATE SCREEN & VẼ KHÔNG CUỘN
+# ==========================================
+ANSI_ENABLED = False
+_WIN32_HANDLE = None
+
+
+class _COORD(ctypes.Structure):
+    _fields_ = [("X", wintypes.SHORT), ("Y", wintypes.SHORT)]
+
+
+class _SMALL_RECT(ctypes.Structure):
+    _fields_ = [
+        ("Left", wintypes.SHORT),
+        ("Top", wintypes.SHORT),
+        ("Right", wintypes.SHORT),
+        ("Bottom", wintypes.SHORT),
+    ]
+
+
+class _CONSOLE_SCREEN_BUFFER_INFO(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", _COORD),
+        ("dwCursorPosition", _COORD),
+        ("wAttributes", wintypes.WORD),
+        ("srWindow", _SMALL_RECT),
+        ("dwMaximumWindowSize", _COORD),
+    ]
+
+
+def enable_windows_ansi():
+    """Kích hoạt Virtual Terminal (ANSI) trên Windows Console bằng Win32 API."""
+    global ANSI_ENABLED, _WIN32_HANDLE
+
+    if os.name != "nt":
+        ANSI_ENABLED = True
+        return True
+
+    # Hỗ trợ các terminal Unix-like trên Windows (Git Bash / mintty / WT / VS Code).
+    env_ansi = bool(
+        os.environ.get("WT_SESSION")
+        or os.environ.get("TERM_PROGRAM")
+        or os.environ.get("TERM")
+    )
+
+    try:
+        kernel32 = ctypes.windll.kernel32
+        kernel32.GetStdHandle.argtypes = [wintypes.DWORD]
+        kernel32.GetStdHandle.restype = wintypes.HANDLE
+        kernel32.GetConsoleMode.argtypes = [
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.DWORD),
+        ]
+        kernel32.GetConsoleMode.restype = wintypes.BOOL
+        kernel32.SetConsoleMode.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        kernel32.SetConsoleMode.restype = wintypes.BOOL
+
+        STD_OUTPUT_HANDLE = wintypes.DWORD(-11)
+        ENABLE_PROCESSED_OUTPUT = 0x0001
+        ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+
+        handle = kernel32.GetStdHandle(STD_OUTPUT_HANDLE)
+        _WIN32_HANDLE = handle
+        mode = wintypes.DWORD()
+        if handle and kernel32.GetConsoleMode(handle, ctypes.byref(mode)):
+            new_mode = (
+                mode.value
+                | ENABLE_PROCESSED_OUTPUT
+                | ENABLE_VIRTUAL_TERMINAL_PROCESSING
+            )
+            if kernel32.SetConsoleMode(handle, new_mode):
+                ANSI_ENABLED = True
+                return True
+    except Exception:
+        pass
+
+    # Dự phòng: kích hoạt qua shell mặc định nếu terminal hỗ trợ.
+    os.system("")
+    ANSI_ENABLED = env_ansi
+    return ANSI_ENABLED
+
+
+def enter_screen_mode():
+    """Vào Alternate Screen Buffer, tắt auto-wrap và ẩn con trỏ để chống cuộn."""
+    if ANSI_ENABLED:
+        # ?1049h: mở màn hình phụ (không có thanh cuộn lịch sử)
+        # ?7l   : tắt tự động xuống dòng khi chạm mép phải
+        # ?25l  : ẩn con trỏ nhấp nháy
+        sys.stdout.write("\033[?1049h\033[?7l\033[?25l\033[2J\033[1;1H")
+        sys.stdout.flush()
+    else:
+        os.system("cls" if os.name == "nt" else "clear")
+
+
+def exit_screen_mode():
+    """Khôi phục lại màn hình terminal gốc khi thoát trò chơi."""
+    if ANSI_ENABLED:
+        sys.stdout.write("\033[?7h\033[?25h\033[?1049l")
+        sys.stdout.flush()
+
+
+def get_terminal_size():
+    size = shutil.get_terminal_size(fallback=(80, 28))
+    return size.columns, size.lines
+
+
+def _render_frame_win32(lines, term_cols, term_rows):
+    """Fallback dùng Win32 API ghi đè trực tiếp lên viewport nếu không có ANSI."""
+    try:
+        kernel32 = ctypes.windll.kernel32
+        csbi = _CONSOLE_SCREEN_BUFFER_INFO()
+        if not _WIN32_HANDLE or not kernel32.GetConsoleScreenBufferInfo(
+            _WIN32_HANDLE, ctypes.byref(csbi)
+        ):
+            raise OSError("No console buffer")
+
+        top_y = csbi.srWindow.Top
+        max_cols = max(1, term_cols - 1)
+        written = wintypes.DWORD()
+        for idx in range(term_rows):
+            text = lines[idx][:max_cols] if idx < len(lines) else ""
+            padded = text.ljust(max_cols)
+            kernel32.SetConsoleCursorPosition(
+                _WIN32_HANDLE, _COORD(0, top_y + idx)
+            )
+            kernel32.WriteConsoleW(
+                _WIN32_HANDLE, padded, len(padded), ctypes.byref(written), None
+            )
+        return
+    except Exception:
+        os.system("cls" if os.name == "nt" else "clear")
+        max_cols = max(1, term_cols - 1)
+        sys.stdout.write(
+            "\n".join(line[:max_cols] for line in lines[: max(1, term_rows - 1)])
+        )
+        sys.stdout.flush()
+
+
+def render_frame(lines):
+    """Vẽ từng dòng theo tọa độ tuyệt đối (row, 1), không dùng ký tự xuống dòng để không cuộn."""
+    term_cols, term_rows = get_terminal_size()
+    max_cols = max(1, term_cols - 1)  # Chừa 1 cột cuối để không kích hoạt wrap-scroll.
+    frame_width = max((len(line) for line in lines), default=UI_WIDTH)
+    frame_height = len(lines)
+
+    display_lines = list(lines)
+    if term_rows < frame_height or term_cols < frame_width:
+        warning = (
+            f"[!] Terminal quá nhỏ ({term_cols}x{term_rows}), "
+            f"cần >= {frame_width}x{frame_height}. Kéo rộng thêm!"
+        )
+        if term_rows >= 1:
+            if len(display_lines) < term_rows:
+                display_lines.extend([""] * (term_rows - len(display_lines)))
+            display_lines[term_rows - 1] = warning[:max_cols]
+
+    if not ANSI_ENABLED:
+        _render_frame_win32(display_lines, term_cols, term_rows)
+        return
+
+    # Ghi từng dòng bằng mã định vị tuyệt đối ESC[row;1H (không chứa ký tự xuống dòng).
+    chunks = []
+    for row_idx in range(1, term_rows + 1):
+        text = display_lines[row_idx - 1][:max_cols] if row_idx <= len(display_lines) else ""
+        chunks.append(f"\033[{row_idx};1H{text}\033[K")
+    sys.stdout.write("".join(chunks))
+    sys.stdout.flush()
+
+
+def compose_overlay(base_lines, panel_lines):
+    """Chồng bảng nổi (Pause/Guide/Game Over) vào giữa khung nền rồi vẽ 1 lần, tránh nháy."""
+    merged = list(base_lines)
+    base_height = len(merged)
+    base_width = max((len(line) for line in merged), default=UI_WIDTH)
+    panel_height = len(panel_lines)
+    panel_width = max((len(line) for line in panel_lines), default=0)
+    canvas_width = max(base_width, panel_width)
+
+    start_row = max(0, (base_height - panel_height) // 2)
+    start_col = max(0, (canvas_width - panel_width) // 2)
+
+    for offset, panel_line in enumerate(panel_lines):
+        target_row = start_row + offset
+        if target_row >= base_height:
+            merged.append(panel_line.center(canvas_width))
+            continue
+        bg = merged[target_row].ljust(canvas_width)
+        end_col = start_col + len(panel_line)
+        merged[target_row] = bg[:start_col] + panel_line + bg[end_col:]
+    return merged
 
 
 # ==========================================
@@ -255,6 +459,10 @@ class GameStats:
         self.combo = 0
         self._clear_streak = 0
 
+    def add_drop_points(self, points):
+        """Cộng điểm khi người chơi chủ động làm khối rơi."""
+        self.score += points
+
     def record_lock(self, cleared):
         """Gọi khi một khối đã chạm đáy; trả về điểm của lượt đặt khối.
 
@@ -276,6 +484,34 @@ class GameStats:
         self.total_lines += cleared
         self.level = 1 + self.total_lines // LINES_PER_LEVEL
         return earned
+
+
+def load_high_scores():
+    """Đọc bảng điểm cao; nếu file chưa có hoặc lỗi thì trả về danh sách rỗng."""
+    try:
+        with open(HIGH_SCORE_FILE, "r", encoding="utf-8") as file:
+            scores = json.load(file)
+        return scores if isinstance(scores, list) else []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def save_high_score(score, difficulty, total_lines, level):
+    """Lưu kết quả và giữ tối đa 10 điểm cao nhất."""
+    scores = load_high_scores()
+    scores.append({
+        "score": score,
+        "difficulty": difficulty,
+        "lines": total_lines,
+        "level": level,
+    })
+    scores.sort(key=lambda item: item.get("score", 0), reverse=True)
+    scores = scores[:MAX_HIGH_SCORES]
+    try:
+        with open(HIGH_SCORE_FILE, "w", encoding="utf-8") as file:
+            json.dump(scores, file, ensure_ascii=False, indent=2)
+    except OSError:
+        pass
 
 
 # ==========================================
@@ -465,7 +701,6 @@ def build_stats_box(total_lines, fall_delay, difficulty, paused, score, level, c
         "│" + status_badge.center(w) + "│",
         "└" + "─" * w + "┘",
     ]
-
 
 def build_next_box(next_block):
     """Tạo khung Next Block và căn giữa hình khối kế tiếp."""
@@ -685,15 +920,21 @@ def show_menu():
             elif selected_index == 1:  # DIFFICULTY1
                 difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
             elif selected_index == 2:  # HIGH SCORES
+                scores = load_high_scores()
+                score_lines = ["", " TOP 10 ĐIỂM CAO"]
+                if not scores:
+                    score_lines.append("Chưa có điểm cao được lưu.")
+                else:
+                    for rank, item in enumerate(scores, 1):
+                        score_lines.append(
+                            f"{rank:>2}. {item.get('score', 0):>8} điểm | "
+                            f"{item.get('difficulty', '?')} | "
+                            f"{item.get('lines', 0)} hàng | Lv.{item.get('level', 1)}"
+                        )
+                score_lines.extend(["", "Nhấn phím bất kỳ để quay lại Menu."])
                 panel = make_panel(
-                    "HIGH SCORES",
-                    [
-                        "Chưa có điểm cao được lưu.",
-                        "",
-                        "Nhấn phím bất kỳ để quay lại Menu.",
-                    ],
-                    width=UI_WIDTH,
-                    height=UI_HEIGHT,
+                    "HIGH SCORES", score_lines, width=UI_WIDTH,
+                    body_align="left", height=UI_HEIGHT,
                 )
                 render_frame(panel)
                 wait_key_with_resize(lambda: render_frame(panel))
@@ -741,6 +982,7 @@ def play_game(difficulty, base_fall_delay):
         )
 
     def show_game_over():
+        save_high_score(stats.score, difficulty, stats.total_lines, stats.level)
         panel = make_panel(
             "GAME OVER",
             [
@@ -795,8 +1037,11 @@ def play_game(difficulty, base_fall_delay):
                 needs_redraw = True
             elif key == " ":
                 # Hard-drop: đưa khối xuống vị trí thấp nhất có thể.
+                drop_cells = 0
                 while current_block.can_move(0, 1):
                     current_block.y += 1
+                    drop_cells += 1
+                stats.add_drop_points(2 * drop_cells)  # Hard-drop: +2 điểm / ô.
                 # Kích hoạt xử lý cố định khối ngay ở vòng lặp kế tiếp.
                 last_fall_time = time.monotonic() - fall_delay
                 needs_redraw = True
