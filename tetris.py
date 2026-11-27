@@ -644,14 +644,24 @@ class BlockL(Block):
         super().__init__(x, y, matrix("  L", "LLL", "   "))
 
 
+_block_bag = []
+
+
 def spawn_block():
-    return random.choice((BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL))(5, 1)
+    """Sinh khối theo chuẩn 7-Bag Randomizer (chống lặp chuỗi dài)."""
+    global _block_bag
+    if not _block_bag:
+        _block_bag = [BlockI, BlockO, BlockT, BlockS, BlockZ, BlockJ, BlockL]
+        random.shuffle(_block_bag)
+    chosen_class = _block_bag.pop()
+    return chosen_class(x=5, y=1)
 
 
 # ==========================================
 # JD01: KHỞI TẠO BÀN CHƠI
 # ==========================================
 def init_board():
+    _block_bag.clear()
     for i in range(H):
         board[i] = ["#" if i in (0, H - 1) or j in (0, W - 1) else " " for j in range(W)]
 
