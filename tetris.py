@@ -29,6 +29,12 @@ DIFFICULTIES = [
 ]
 MIN_FALL_DELAY = 0.08  # JD03: Không để tốc độ rơi tăng vô hạn.
 
+# Điều khiển ngang DAS/ARR (giữ phím để tự dịch chuyển).
+DAS = 0.150  # Chờ 150 ms trước khi lặp tự động.
+ARR = 0.035  # Lặp mỗi 35 ms sau DAS.
+LOCK_DELAY = 0.500  # Chờ 500 ms sau khi chạm nền trước khi khóa khối.
+MAX_LOCK_RESETS = 15  # Giới hạn reset lock-delay để tránh giữ khối vô hạn.
+
 # Kích thước khung ngoài thống nhất cho cả Menu chính và Màn chơi.
 UI_WIDTH = 66
 UI_HEIGHT = H + 2  # 26 dòng (gồm viền ngoài trên/dưới + 24 dòng nội dung).
@@ -36,8 +42,8 @@ SIDE_PANEL_INNER_W = 28  # Chiều rộng nội dung bảng thông số bên ph�
 
 # Nội dung Guide dùng chung cho menu chính và Pause Menu.
 GUIDE_ITEMS = [
-    "A / ←         : Di chuyển sang trái",
-    "D / →         : Di chuyển sang phải",
+    "A / ←         : Di chuyển trái",
+    "D / →         : Di chuyển phải",
     "W / ↑         : Xoay thuận chiều kim đồng hồ",
     "Z             : Xoay ngược chiều kim đồng hồ",
     "S / X / ↓     : Rơi nhanh",
@@ -966,6 +972,13 @@ def show_menu():
                 return None
 
 
+# Poll trạng thái phím đang giữ để DAS/ARR không phụ thuộc repeat-rate Windows.
+def is_key_held(vk):
+    if os.name != "nt":
+        return False
+    return bool(ctypes.windll.user32.GetAsyncKeyState(vk) & 0x8000)
+
+
 # ==========================================
 # JD05: VÒNG LẶP GAME VÀ ĐIỀU KHIỂN
 # ==========================================
@@ -977,6 +990,13 @@ def play_game(difficulty, base_fall_delay):
     stats = GameStats()
     last_fall_time = time.monotonic()
     last_term_size = get_terminal_size()
+
+    horizontal_dir = 0
+    horizontal_started = 0.0
+    horizontal_last_repeat = 0.0
+    lock_started = None
+    lock_resets = 0
+    hard_drop_lock = False
 
     def draw_game(paused=False, overlay=None):
         draw(
@@ -1007,6 +1027,23 @@ def play_game(difficulty, base_fall_delay):
         draw_game(overlay=panel)
         wait_key_with_resize(lambda: draw_game(overlay=panel))
 
+    def lock_current_block():
+        nonlocal current_block, next_block, fall_delay, lock_started, lock_resets, hard_drop_lock
+        current_block.to_board()
+        cleared = remove_line()
+        stats.record_lock(cleared)
+        if cleared > 0:
+            fall_delay = max(MIN_FALL_DELAY, fall_delay * (0.9797 ** cleared))
+        current_block = next_block
+        next_block = spawn_block()
+        lock_started = None
+        lock_resets = 0
+        hard_drop_lock = False
+        if not current_block.can_move(0, 0):
+            show_game_over()
+            return False
+        return True
+
     if not current_block.can_move(0, 0):
         show_game_over()
         return
@@ -1026,34 +1063,66 @@ def play_game(difficulty, base_fall_delay):
         current_block.del_from_board()
         current_block.del_ghost_from_board()
 
-        # Đọc phím thường xuyên, độc lập với đồng hồ rơi tự động.
+        # DAS/ARR: di chuyển ngay khi vừa giữ phím, chờ DAS rồi lặp theo ARR.
+        left_held = is_key_held(0x25) or is_key_held(ord("A"))
+        right_held = is_key_held(0x27) or is_key_held(ord("D"))
+        held_dir = -1 if left_held and not right_held else (1 if right_held and not left_held else 0)
+        now_input = time.monotonic()
+        if held_dir != horizontal_dir:
+            horizontal_dir = held_dir
+            horizontal_started = now_input
+            horizontal_last_repeat = now_input + DAS
+            if horizontal_dir and current_block.can_move(horizontal_dir, 0):
+                was_grounded = not current_block.can_move(0, 1)
+                current_block.x += horizontal_dir
+                needs_redraw = True
+                if was_grounded and lock_started is not None and lock_resets < MAX_LOCK_RESETS:
+                    lock_started = now_input
+                    lock_resets += 1
+        elif horizontal_dir and now_input - horizontal_started >= DAS:
+            if now_input - horizontal_last_repeat >= ARR:
+                repeats = max(1, int((now_input - horizontal_last_repeat) / ARR))
+                for _ in range(repeats):
+                    if current_block.can_move(horizontal_dir, 0):
+                        was_grounded = not current_block.can_move(0, 1)
+                        current_block.x += horizontal_dir
+                        needs_redraw = True
+                        if was_grounded and lock_started is not None and lock_resets < MAX_LOCK_RESETS:
+                            lock_started = now_input
+                            lock_resets += 1
+                    horizontal_last_repeat += ARR
+
+        # Đọc các phím hành động; trái/phải được xử lý bởi DAS/ARR ở trên.
         while msvcrt.kbhit():
             key = read_key()
-            if key in ("a", "left") and current_block.can_move(-1, 0):
-                current_block.x -= 1
-                needs_redraw = True
-            elif key in ("d", "right") and current_block.can_move(1, 0):
-                current_block.x += 1
-                needs_redraw = True
+            if key in ("a", "left", "d", "right"):
+                continue
             elif key in ("s", "x", "down") and current_block.can_move(0, 1):
                 current_block.y += 1
                 last_fall_time = time.monotonic()
                 needs_redraw = True
             elif key in ("w", "up"):
+                old_shape, old_x, old_y = current_block.shape, current_block.x, current_block.y
                 current_block.rotate()
                 needs_redraw = True
+                if (current_block.shape != old_shape or current_block.x != old_x or current_block.y != old_y) and lock_started is not None and lock_resets < MAX_LOCK_RESETS:
+                    lock_started = time.monotonic()
+                    lock_resets += 1
             elif key == "z":
+                old_shape, old_x, old_y = current_block.shape, current_block.x, current_block.y
                 current_block.rotate_counterclockwise()
                 needs_redraw = True
+                if (current_block.shape != old_shape or current_block.x != old_x or current_block.y != old_y) and lock_started is not None and lock_resets < MAX_LOCK_RESETS:
+                    lock_started = time.monotonic()
+                    lock_resets += 1
             elif key == " ":
-                # Hard-drop: đưa khối xuống vị trí thấp nhất có thể.
+                # Hard-drop: đưa khối xuống thấp nhất và khóa ngay, bỏ qua Lock Delay.
                 drop_cells = 0
                 while current_block.can_move(0, 1):
                     current_block.y += 1
                     drop_cells += 1
-                stats.add_drop_points(2 * drop_cells)  # Hard-drop: +2 điểm / ô.
-                # Kích hoạt xử lý cố định khối ngay ở vòng lặp kế tiếp.
-                last_fall_time = time.monotonic() - fall_delay
+                stats.add_drop_points(2 * drop_cells)
+                hard_drop_lock = True
                 needs_redraw = True
             elif key in ("p", "esc"):
                 current_block.ghost_to_board()
@@ -1079,9 +1148,7 @@ def play_game(difficulty, base_fall_delay):
                             pause_body.append(f"      {option}")
                     pause_body.append("")
                     pause_body.append("W/S hoặc ↑/↓: Chọn | Enter: Xác nhận".center(inner_w))
-                    pause_panel = make_panel(
-                        "PAUSED", pause_body, width=panel_w, body_align="left"
-                    )
+                    pause_panel = make_panel("PAUSED", pause_body, width=panel_w, body_align="left")
 
                     def redraw_pause():
                         draw_game(paused=True, overlay=pause_panel)
@@ -1094,7 +1161,7 @@ def play_game(difficulty, base_fall_delay):
                         pause_selected = (pause_selected + 1) % len(pause_options)
                     elif pause_key in ("q", "esc"):
                         pause_action = "EXIT"
-                    elif pause_key in ("p", "esc"):
+                    elif pause_key == "p":
                         pause_action = "RESUME"
                     elif pause_key == "enter":
                         pause_action = pause_options[pause_selected]
@@ -1104,49 +1171,49 @@ def play_game(difficulty, base_fall_delay):
                             "",
                             "  Nhấn phím bất kỳ để quay lại Pause Menu.",
                         ]
-                        guide_panel = make_panel(
-                            "GAME GUIDE", guide_lines, width=54, body_align="left"
-                        )
+                        guide_panel = make_panel("GAME GUIDE", guide_lines, width=54, body_align="left")
                         draw_game(paused=True, overlay=guide_panel)
-                        wait_key_with_resize(
-                            lambda: draw_game(paused=True, overlay=guide_panel)
-                        )
+                        wait_key_with_resize(lambda: draw_game(paused=True, overlay=guide_panel))
                         pause_action = None
                         pause_selected = 1
 
                 if pause_action == "EXIT":
-                    return  # Về menu chính, kết thúc lượt chơi.
-                last_fall_time += time.monotonic() - pause_start
+                    return
+                pause_duration = time.monotonic() - pause_start
+                last_fall_time += pause_duration
+                if lock_started is not None:
+                    lock_started += pause_duration  # Tạm dừng luôn bộ đếm khóa khối.
+                horizontal_dir = 0
+                horizontal_started = horizontal_last_repeat = time.monotonic()
                 current_block.del_from_board()
                 current_block.del_ghost_from_board()
                 needs_redraw = True
-            elif key in ("q", "esc"):
-                return  # Trở về menu chính.
+            elif key == "q":
+                return
 
         now = time.monotonic()
+        # Rơi tự động; nếu chạm nền thì khởi động Lock Delay thay vì khóa ngay.
         if now - last_fall_time >= fall_delay:
             last_fall_time = now
             needs_redraw = True
             if current_block.can_move(0, 1):
                 current_block.y += 1
-            else:
-                # Cố định khối trước khi xóa hàng (JD02).
-                current_block.to_board()
-                cleared = remove_line()
-                stats.record_lock(cleared)
+                lock_started = None
+            elif lock_started is None:
+                lock_started = now
 
-                # JD03: Giữ cơ chế cũ: xóa càng nhiều hàng, rơi càng nhanh.
-                if cleared > 0:
-                    fall_delay = max(
-                        MIN_FALL_DELAY,
-                        fall_delay * (0.9797 ** cleared),
-                    )
+        grounded = not current_block.can_move(0, 1)
+        if not grounded:
+            lock_started = None
+        elif lock_started is None:
+            lock_started = now
 
-                current_block = next_block
-                next_block = spawn_block()
-                if not current_block.can_move(0, 0):
-                    show_game_over()
-                    return
+        # Hard-drop khóa tức thì; còn chạm nền bình thường chờ đủ Lock Delay.
+        if hard_drop_lock or (grounded and lock_started is not None and now - lock_started >= LOCK_DELAY):
+            if not lock_current_block():
+                return
+            last_fall_time = time.monotonic()
+            needs_redraw = True
 
         # Vẽ bóng mờ TRƯỚC, vẽ khối thật đè lên SAU
         current_block.ghost_to_board()
@@ -1154,6 +1221,7 @@ def play_game(difficulty, base_fall_delay):
         if needs_redraw:
             draw_game()
         time.sleep(0.01)
+
 
 
 def main():
