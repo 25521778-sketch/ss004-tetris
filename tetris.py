@@ -49,6 +49,7 @@ GUIDE_ITEMS = [
     "Z             : Xoay ngược chiều kim đồng hồ",
     "S / X / ↓     : Rơi nhanh",
     "SPACE         : Rơi tức thì",
+    "C             : Đổi khối",
     "P             : Tạm dừng / tiếp tục",
     "Q / ESC       : Về menu",
     "",
@@ -726,21 +727,38 @@ def build_stats_box(total_lines, fall_delay, difficulty, paused, score, level, c
         "└" + "─" * w + "┘",
     ]
 
-def build_next_box(next_block):
-    """Tạo khung Next Block và tô màu chuẩn cho hình khối kế tiếp."""
+PREVIEW_SHAPES = {
+    BlockI: ["IIII", "    "],
+    BlockO: ["OO", "OO"],
+    BlockT: [" T ", "TTT"],
+    BlockS: [" SS", "SS "],
+    BlockZ: ["ZZ ", " ZZ"],
+    BlockJ: ["J  ", "JJJ"],
+    BlockL: ["  L", "LLL"],
+}
+
+
+def build_preview_box(title, block_or_cls, dimmed=False):
+    """Tạo khung xem trước cố định 6 dòng cho NEXT BLOCK và HOLD."""
     w = SIDE_PANEL_INNER_W
     box = [
         "┌" + "─" * w + "┐",
-        "│" + "NEXT BLOCK".center(w) + "│",
+        "│" + title.center(w) + "│",
         "├" + "─" * w + "┤",
     ]
-    shape = next_block.shape
-    for row in shape:
+    if block_or_cls is None:
+        rows = ["", ""]
+    else:
+        cls = block_or_cls if isinstance(block_or_cls, type) else type(block_or_cls)
+        rows = PREVIEW_SHAPES.get(cls, ["", ""])
+
+    for row in rows:
         cells = []
         for cell in row:
             if cell != " ":
-                color = BLOCK_COLORS.get(cell, "")
-                cells.append(f"{color}{CELL_BLOCK}{RESET_COLOR}" if color else CELL_BLOCK)
+                color = BLOCK_COLORS.get("." if dimmed else cell, "") if ANSI_ENABLED else ""
+                glyph = CELL_GHOST if dimmed else CELL_BLOCK
+                cells.append(f"{color}{glyph}{RESET_COLOR}" if color else glyph)
             else:
                 cells.append("  ")
         box.append("│" + pad_ansi("".join(cells), w, align="center") + "│")
@@ -749,15 +767,19 @@ def build_next_box(next_block):
 
 
 def build_game_frame(total_lines=0, fall_delay=1.5, difficulty="NORMAL",
-                     paused=False, score=0, level=1, combo=0, next_block=None):
-    """Tạo màn chơi với Next Block phía trên bảng thông số (hỗ trợ màu ANSI)."""
+                     paused=False, score=0, level=1, combo=0,
+                     next_block=None, hold_block=None, can_hold=True):
+    """Tạo màn chơi gồm Next Block, Hold và bảng thông số vừa khít chiều cao H."""
     outer_inner_w = UI_WIDTH - 2
+    side_box_w = SIDE_PANEL_INNER_W + 2
+    spacer = [" " * side_box_w]
+
+    next_box = build_preview_box("NEXT BLOCK", next_block)
+    hold_box = build_preview_box("HOLD (C)", hold_block, dimmed=not can_hold)
     stats_box = build_stats_box(
         total_lines, fall_delay, difficulty, paused, score, level, combo
     )
-    next_box = build_next_box(next_block) if next_block else []
-    side_box = next_box + stats_box
-    side_box_w = SIDE_PANEL_INNER_W + 2
+    side_box = next_box + spacer + hold_box + spacer + stats_box
 
     lines = ["╔" + "═" * outer_inner_w + "╗"]
     for i in range(H):
@@ -770,7 +792,8 @@ def build_game_frame(total_lines=0, fall_delay=1.5, difficulty="NORMAL",
 
 
 def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False,
-         score=0, level=1, combo=0, next_block=None, overlay=None):
+         score=0, level=1, combo=0, next_block=None, hold_block=None,
+         can_hold=True, overlay=None):
     """Vẽ màn chơi tại tọa độ cố định (1, 1); hỗ trợ ghép bảng nổi không nháy."""
     frame = build_game_frame(
         total_lines=total_lines,
@@ -781,6 +804,8 @@ def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False,
         level=level,
         combo=combo,
         next_block=next_block,
+        hold_block=hold_block,
+        can_hold=can_hold,
     )
     if overlay is not None:
         frame = compose_overlay(frame, overlay)
@@ -1010,9 +1035,9 @@ def show_menu():
                 apply_theme(CURRENT_THEME_INDEX + 1)
             elif selected_index == 3:  # HIGH SCORES
                 scores = load_high_scores()
-                score_lines = ["", " TOP 10 ĐIỂM CAO"]
+                score_lines = ["", " TOP 10 ĐIỂM CAO NHẤT"]
                 if not scores:
-                    score_lines.append("Chưa có điểm cao được lưu.")
+                    score_lines.append("Chưa có điểm được lưu.")
                 else:
                     for rank, item in enumerate(scores, 1):
                         score_lines.append(
@@ -1059,6 +1084,8 @@ def play_game(difficulty, base_fall_delay):
     init_board()
     current_block = spawn_block()
     next_block = spawn_block()
+    hold_block_cls = None
+    can_hold = True
     fall_delay = base_fall_delay
     stats = GameStats()
     last_fall_time = time.monotonic()
@@ -1081,6 +1108,8 @@ def play_game(difficulty, base_fall_delay):
             level=stats.level,
             combo=stats.combo,
             next_block=next_block,
+            hold_block=hold_block_cls,
+            can_hold=can_hold,
             overlay=overlay,
         )
 
@@ -1101,7 +1130,7 @@ def play_game(difficulty, base_fall_delay):
         wait_key_with_resize(lambda: draw_game(overlay=panel))
 
     def lock_current_block():
-        nonlocal current_block, next_block, fall_delay, lock_started, lock_resets, hard_drop_lock
+        nonlocal current_block, next_block, fall_delay, lock_started, lock_resets, hard_drop_lock, can_hold
         current_block.to_board()
         cleared = remove_line()
         stats.record_lock(cleared)
@@ -1109,6 +1138,7 @@ def play_game(difficulty, base_fall_delay):
             fall_delay = max(MIN_FALL_DELAY, fall_delay * (0.9797 ** cleared))
         current_block = next_block
         next_block = spawn_block()
+        can_hold = True
         lock_started = None
         lock_resets = 0
         hard_drop_lock = False
@@ -1197,6 +1227,22 @@ def play_game(difficulty, base_fall_delay):
                 stats.add_drop_points(2 * drop_cells)
                 hard_drop_lock = True
                 needs_redraw = True
+            elif key == "c" and can_hold and not hard_drop_lock:
+                if hold_block_cls is None:
+                    hold_block_cls = type(current_block)
+                    current_block = next_block
+                    next_block = spawn_block()
+                else:
+                    hold_block_cls, swapped_cls = type(current_block), hold_block_cls
+                    current_block = swapped_cls(x=5, y=1)
+                can_hold = False
+                lock_started = None
+                lock_resets = 0
+                last_fall_time = time.monotonic()
+                needs_redraw = True
+                if not current_block.can_move(0, 0):
+                    show_game_over()
+                    return
             elif key in ("p", "esc"):
                 current_block.ghost_to_board()
                 current_block.to_board()
@@ -1244,7 +1290,7 @@ def play_game(difficulty, base_fall_delay):
                             "",
                             "  Nhấn phím bất kỳ để quay lại Pause Menu.",
                         ]
-                        guide_panel = make_panel("GAME GUIDE", guide_lines, width=54, body_align="left")
+                        guide_panel = make_panel("GAME GUIDE", guide_lines, width=62, body_align="left")
                         draw_game(paused=True, overlay=guide_panel)
                         wait_key_with_resize(lambda: draw_game(paused=True, overlay=guide_panel))
                         pause_action = None
