@@ -410,7 +410,7 @@ def render_board_row(i):
 
 
 def build_stats_box(total_lines, fall_delay, difficulty, paused, score, level, combo):
-    """Tạo khung thông số bên phải (không còn bảng điều khiển phía dưới)."""
+    """Tạo khung thông số bên phải."""
     w = SIDE_PANEL_INNER_W
     status_badge = "*** TẠM DỪNG ***" if paused else ""
     return [
@@ -427,27 +427,43 @@ def build_stats_box(total_lines, fall_delay, difficulty, paused, score, level, c
     ]
 
 
+def build_next_box(next_block):
+    """Tạo khung Next Block và căn giữa hình khối kế tiếp."""
+    w = SIDE_PANEL_INNER_W
+    box = [
+        "┌" + "─" * w + "┐",
+        "│" + "NEXT BLOCK".center(w) + "│",
+        "├" + "─" * w + "┤",
+    ]
+    shape = next_block.shape
+    for row in shape:
+        cells = "".join("██" if cell != " " else "  " for cell in row)
+        box.append("│" + cells.center(w) + "│")
+    box.append("└" + "─" * w + "┘")
+    return box
+
+
 def build_game_frame(total_lines=0, fall_delay=1.5, difficulty="NORMAL",
-                     paused=False, score=0, level=1, combo=0):
-    """Tạo màn chơi có khung bao ngoài cố định UI_WIDTH x UI_HEIGHT, đồng bộ với Menu."""
+                     paused=False, score=0, level=1, combo=0, next_block=None):
+    """Tạo màn chơi với Next Block phía trên bảng thông số."""
     outer_inner_w = UI_WIDTH - 2
     stats_box = build_stats_box(
         total_lines, fall_delay, difficulty, paused, score, level, combo
     )
-    stats_box_w = SIDE_PANEL_INNER_W + 2  # Gồm 2 ký tự viền trái/phải.
+    next_box = build_next_box(next_block) if next_block else []
+    side_box = next_box + stats_box
+    side_box_w = SIDE_PANEL_INNER_W + 2
 
     lines = ["╔" + "═" * outer_inner_w + "╗"]
     for i in range(H):
         left_part = render_board_row(i)
-        right_part = stats_box[i] if i < len(stats_box) else " " * stats_box_w
+        right_part = side_box[i] if i < len(side_box) else " " * side_box_w
         content = f"  {left_part}  {right_part}  "
         lines.append("║" + content.ljust(outer_inner_w)[:outer_inner_w] + "║")
     lines.append("╚" + "═" * outer_inner_w + "╝")
     return lines
-
-
 def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False,
-         score=0, level=1, combo=0, overlay=None):
+         score=0, level=1, combo=0, next_block=None, overlay=None):
     """Vẽ màn chơi tại tọa độ cố định (1, 1); hỗ trợ ghép bảng nổi không nháy."""
     frame = build_game_frame(
         total_lines=total_lines,
@@ -457,6 +473,7 @@ def draw(total_lines=0, fall_delay=1.5, difficulty="NORMAL", paused=False,
         score=score,
         level=level,
         combo=combo,
+        next_block=next_block,
     )
     if overlay is not None:
         frame = compose_overlay(frame, overlay)
@@ -664,6 +681,7 @@ def show_menu():
 def play_game(difficulty, base_fall_delay):
     init_board()
     current_block = spawn_block()
+    next_block = spawn_block()
     fall_delay = base_fall_delay
     stats = GameStats()
     last_fall_time = time.monotonic()
@@ -678,6 +696,7 @@ def play_game(difficulty, base_fall_delay):
             score=stats.score,
             level=stats.level,
             combo=stats.combo,
+            next_block=next_block,
             overlay=overlay,
         )
 
@@ -823,7 +842,8 @@ def play_game(difficulty, base_fall_delay):
                         fall_delay * (0.9797 ** cleared),
                     )
 
-                current_block = spawn_block()
+                current_block = next_block
+                next_block = spawn_block()
                 if not current_block.can_move(0, 0):
                     show_game_over()
                     return
