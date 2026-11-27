@@ -917,15 +917,24 @@ def build_menu_frame(menu_options, selected_index, difficulty_name, theme_name):
     bottom = "╚" + "═" * inner + "╝"
     inner_top = "╠" + "═" * inner + "╣"
 
-    title_art = [
-        "┌──────────────────┐",
-        "│      TETRIS      │",
-        "└──────┐    ┌──────┘",
-        "│    │",
-        "└────┘",
+    letters = [
+        ("Z", ["█████", "  █  ", "  █  ", "  █  ", "  █  "]),  # T
+        ("L", ["█████", "█    ", "████ ", "█    ", "█████"]),  # E
+        ("O", ["█████", "  █  ", "  █  ", "  █  ", "  █  "]),  # T
+        ("S", ["████ ", "█   █", "████ ", "█  █ ", "█   █"]),  # R
+        ("I", ["███",   " █ ",   " █ ",   " █ ",   "███"  ]),  # I
+        ("T", [" ████", "█    ", " ███ ", "    █", "████ "]),  # S
     ]
+    title_art = []
+    for r in range(5):
+        parts = []
+        for key, rows in letters:
+            color = BLOCK_COLORS.get(key, "") if ANSI_ENABLED else ""
+            parts.append(f"{color}{rows[r]}{RESET_COLOR}" if color else rows[r])
+        title_art.append("  ".join(parts))
+
     header = [top, blank_row]
-    header.extend("║" + line.center(inner) + "║" for line in title_art)
+    header.extend("║" + pad_ansi(line, inner, align="center") + "║" for line in title_art)
     header.extend([blank_row, inner_top])
 
     box_width = inner - 6  # Chừa lề 3 trái, 3 phải.
