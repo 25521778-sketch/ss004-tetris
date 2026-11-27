@@ -408,10 +408,6 @@ def _render_frame_win32(lines, term_cols, term_rows):
         sys.stdout.flush()
 
 
-
-
-
-
 class GameStats:
     """Lưu điểm, số hàng đã xóa, cấp độ và chuỗi Combo hiện tại."""
 
@@ -632,22 +628,64 @@ def init_board():
 # ==========================================
 # JD04: KHUNG NGOÀI ĐỒNG BỘ & Ô VUÔNG VỨC
 # ==========================================
-CELL_BLOCK = "██"
-CELL_GHOST = "░░"  
 CELL_EMPTY = "  "
-
-
 RESET_COLOR = "\033[0m"
-BLOCK_COLORS = {
-    "I": "\033[96m",          # Xanh lơ (Cyan)
-    "O": "\033[93m",          # Vàng sáng (Yellow)
-    "T": "\033[95m",          # Tím (Magenta)
-    "S": "\033[92m",          # Xanh lá (Green)
-    "Z": "\033[91m",          # Đỏ (Red)
-    "J": "\033[94m",          # Xanh dương (Blue)
-    "L": "\033[38;5;208m",    # Cam (Orange - chuẩn 256 màu)
-    ".": "\033[90m",          # Xám tối cho bóng mờ (Ghost)
-}
+
+THEMES = [
+    ("CLASSIC", {
+        "block": "██",
+        "ghost": "░░",
+        "colors": {
+            "I": "\033[96m", "O": "\033[93m", "T": "\033[95m",
+            "S": "\033[92m", "Z": "\033[91m", "J": "\033[94m",
+            "L": "\033[38;5;208m", ".": "\033[90m",
+        },
+    }),
+    ("NEON", {
+        "block": "▓▓",
+        "ghost": "▒▒",
+        "colors": {
+            "I": "\033[38;5;51m", "O": "\033[38;5;226m", "T": "\033[38;5;201m",
+            "S": "\033[38;5;46m", "Z": "\033[38;5;196m", "J": "\033[38;5;33m",
+            "L": "\033[38;5;208m", ".": "\033[38;5;240m",
+        },
+    }),
+    ("PASTEL", {
+        "block": "██",
+        "ghost": "░░",
+        "colors": {
+            "I": "\033[38;5;159m", "O": "\033[38;5;229m", "T": "\033[38;5;183m",
+            "S": "\033[38;5;157m", "Z": "\033[38;5;217m", "J": "\033[38;5;153m",
+            "L": "\033[38;5;223m", ".": "\033[38;5;244m",
+        },
+    }),
+    ("RETRO", {
+        "block": "[]",
+        "ghost": "..",
+        "colors": {
+            "I": "\033[38;5;118m", "O": "\033[38;5;154m", "T": "\033[38;5;82m",
+            "S": "\033[38;5;46m", "Z": "\033[38;5;40m", "J": "\033[38;5;120m",
+            "L": "\033[38;5;148m", ".": "\033[38;5;22m",
+        },
+    }),
+]
+
+CURRENT_THEME_INDEX = 0
+CELL_BLOCK = "██"
+CELL_GHOST = "░░"
+BLOCK_COLORS = {}
+
+
+def apply_theme(index):
+    global CURRENT_THEME_INDEX, CELL_BLOCK, CELL_GHOST, BLOCK_COLORS
+    CURRENT_THEME_INDEX = index % len(THEMES)
+    _, cfg = THEMES[CURRENT_THEME_INDEX]
+    CELL_BLOCK = cfg["block"]
+    CELL_GHOST = cfg["ghost"]
+    BLOCK_COLORS = cfg["colors"]
+
+
+apply_theme(0)
 
 def render_board_row(i):
     """Vẽ một dòng của khung bàn chơi (viền đơn để phân tách với khung ngoài viền đôi)."""
@@ -871,7 +909,7 @@ def wait_key_with_resize(redraw_callback):
 # ==========================================
 # JD05: MENU CHÍNH ĐỒNG BỘ UI_WIDTH x UI_HEIGHT
 # ==========================================
-def build_menu_frame(menu_options, selected_index, difficulty_name):
+def build_menu_frame(menu_options, selected_index, difficulty_name, theme_name):
     """Tạo khung menu chính có đúng kích thước UI_WIDTH x UI_HEIGHT như màn chơi."""
     inner = UI_WIDTH - 2
     blank_row = "║" + " " * inner + "║"
@@ -879,22 +917,36 @@ def build_menu_frame(menu_options, selected_index, difficulty_name):
     bottom = "╚" + "═" * inner + "╝"
     inner_top = "╠" + "═" * inner + "╣"
 
-    title_art = [
-        "┌──────────────────┐",
-        "│      TETRIS      │",
-        "└──────┐    ┌──────┘",
-        "│    │",
-        "└────┘",
+    letters = [
+        ("Z", ["█████", "  █  ", "  █  ", "  █  ", "  █  "]),  # T
+        ("L", ["█████", "█    ", "████ ", "█    ", "█████"]),  # E
+        ("O", ["█████", "  █  ", "  █  ", "  █  ", "  █  "]),  # T
+        ("S", ["████ ", "█   █", "████ ", "█  █ ", "█   █"]),  # R
+        ("I", ["███",   " █ ",   " █ ",   " █ ",   "███"  ]),  # I
+        ("T", [" ████", "█    ", " ███ ", "    █", "████ "]),  # S
     ]
+    title_art = []
+    for r in range(5):
+        parts = []
+        for key, rows in letters:
+            color = BLOCK_COLORS.get(key, "") if ANSI_ENABLED else ""
+            parts.append(f"{color}{rows[r]}{RESET_COLOR}" if color else rows[r])
+        title_art.append("  ".join(parts))
+
     header = [top, blank_row]
-    header.extend("║" + line.center(inner) + "║" for line in title_art)
+    header.extend("║" + pad_ansi(line, inner, align="center") + "║" for line in title_art)
     header.extend([blank_row, inner_top])
 
     box_width = inner - 6  # Chừa lề 3 trái, 3 phải.
     option_rows = []
     for idx, option in enumerate(menu_options):
         marker = ">" if idx == selected_index else " "
-        label = f"DIFFICULTY: {difficulty_name}" if option == "DIFFICULTY" else option
+        if option == "DIFFICULTY":
+            label = f"DIFFICULTY: {difficulty_name}"
+        elif option == "THEME":
+            label = f"THEME: {theme_name}"
+        else:
+            label = option
         content = f" {marker} {label}"
         if idx == selected_index:
             option_rows.append("║" + "   ┌" + "─" * (box_width - 2) + "┐   " + "║")
@@ -907,7 +959,7 @@ def build_menu_frame(menu_options, selected_index, difficulty_name):
 
     footer = [
         "║" + "W/S hoặc ↑/↓: Chọn mục  |  Enter: Xác nhận".center(inner) + "║",
-        "║" + "A/D hoặc ←/→: Thay đổi độ khó".center(inner) + "║",
+        "║" + "A/D hoặc ←/→: Đổi độ khó / Theme".center(inner) + "║",
         bottom,
     ]
 
@@ -923,13 +975,16 @@ def show_menu():
     """Menu chính đóng khung; GUIDE chỉ mở khi chọn và nhấn Enter."""
     difficulty_index = 1  # NORMAL mặc định.
     selected_index = 0
-    menu_options = ["PLAY", "DIFFICULTY", "HIGH SCORES", "GUIDE", "EXIT"]
+    menu_options = ["PLAY", "DIFFICULTY", "THEME", "HIGH SCORES", "GUIDE", "EXIT"]
 
     while True:
         difficulty_name, _fall_delay = DIFFICULTIES[difficulty_index]
+        theme_name = THEMES[CURRENT_THEME_INDEX][0]
 
         def redraw_menu():
-            render_frame(build_menu_frame(menu_options, selected_index, difficulty_name))
+            render_frame(
+                build_menu_frame(menu_options, selected_index, difficulty_name, theme_name)
+            )
 
         redraw_menu()
         key = wait_key_with_resize(redraw_menu)
@@ -942,12 +997,18 @@ def show_menu():
             difficulty_index = (difficulty_index - 1) % len(DIFFICULTIES)
         elif key in ("right", "d") and selected_index == 1:
             difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
+        elif key in ("left", "a") and selected_index == 2:
+            apply_theme(CURRENT_THEME_INDEX - 1)
+        elif key in ("right", "d") and selected_index == 2:
+            apply_theme(CURRENT_THEME_INDEX + 1)
         elif key == "enter":
             if selected_index == 0:  # PLAY
                 return DIFFICULTIES[difficulty_index]
-            elif selected_index == 1:  # DIFFICULTY1
+            elif selected_index == 1:  # DIFFICULTY
                 difficulty_index = (difficulty_index + 1) % len(DIFFICULTIES)
-            elif selected_index == 2:  # HIGH SCORES
+            elif selected_index == 2:  # THEME
+                apply_theme(CURRENT_THEME_INDEX + 1)
+            elif selected_index == 3:  # HIGH SCORES
                 scores = load_high_scores()
                 score_lines = ["", " TOP 10 ĐIỂM CAO"]
                 if not scores:
@@ -966,7 +1027,7 @@ def show_menu():
                 )
                 render_frame(panel)
                 wait_key_with_resize(lambda: render_frame(panel))
-            elif selected_index == 3:  # GUIDE
+            elif selected_index == 4:  # GUIDE
                 guide_lines = ["  " + item if item else "" for item in GUIDE_ITEMS[:-1]] + [
                     "",
                     "  Nhấn phím bất kỳ để quay lại Menu.",
