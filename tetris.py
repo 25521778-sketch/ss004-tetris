@@ -42,8 +42,8 @@ SIDE_PANEL_INNER_W = 28  # Chiều rộng nội dung bảng thông số bên ph�
 
 # Nội dung Guide dùng chung cho menu chính và Pause Menu.
 GUIDE_ITEMS = [
-    "A / ←         : Di chuyển trái (giữ: DAS/ARR)",
-    "D / →         : Di chuyển phải (giữ: DAS/ARR)",
+    "A / ←         : Di chuyển trái",
+    "D / →         : Di chuyển phải",
     "W / ↑         : Xoay thuận chiều kim đồng hồ",
     "Z             : Xoay ngược chiều kim đồng hồ",
     "S / X / ↓     : Rơi nhanh",
