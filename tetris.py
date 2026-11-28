@@ -50,8 +50,7 @@ GUIDE_ITEMS = [
     "S / X / ↓     : Rơi nhanh",
     "SPACE         : Rơi tức thì",
     "C             : Đổi khối",
-    "P             : Tạm dừng / tiếp tục",
-    "Q / ESC       : Về menu",
+    "P / ESC       : Tạm dừng",
     "",
     "CÁCH TÍNH ĐIỂM:",
     "Hard-drop: +2 điểm / ô rơi tức thì bằng SPACE",
@@ -1150,9 +1149,7 @@ def play_game(difficulty, base_fall_delay):
                         pause_selected = (pause_selected - 1) % len(pause_options)
                     elif pause_key in ("down", "s"):
                         pause_selected = (pause_selected + 1) % len(pause_options)
-                    elif pause_key in ("q", "esc"):
-                        pause_action = "EXIT"
-                    elif pause_key == "p":
+                    elif pause_key in ("p", "esc"):
                         pause_action = "RESUME"
                     elif pause_key == "enter":
                         pause_action = pause_options[pause_selected]
@@ -1179,8 +1176,6 @@ def play_game(difficulty, base_fall_delay):
                 current_block.del_from_board()
                 current_block.del_ghost_from_board()
                 needs_redraw = True
-            elif key == "q":
-                return
 
         now = time.monotonic()
         # Rơi tự động; nếu chạm nền thì khởi động Lock Delay thay vì khóa ngay.
