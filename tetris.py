@@ -181,6 +181,7 @@ def get_terminal_size():
 
 def _render_frame_win32(lines, term_cols, term_rows):
     """Fallback dùng Win32 API ghi đè trực tiếp lên viewport nếu không có ANSI."""
+    clean_lines = [ANSI_RE.sub("", line) for line in lines]
     try:
         kernel32 = ctypes.windll.kernel32
         csbi = _CONSOLE_SCREEN_BUFFER_INFO()
@@ -193,7 +194,7 @@ def _render_frame_win32(lines, term_cols, term_rows):
         max_cols = max(1, term_cols - 1)
         written = wintypes.DWORD()
         for idx in range(term_rows):
-            text = lines[idx][:max_cols] if idx < len(lines) else ""
+            text = clean_lines[idx][:max_cols] if idx < len(clean_lines) else ""
             padded = text.ljust(max_cols)
             kernel32.SetConsoleCursorPosition(
                 _WIN32_HANDLE, _COORD(0, top_y + idx)
@@ -206,7 +207,7 @@ def _render_frame_win32(lines, term_cols, term_rows):
         os.system("cls" if os.name == "nt" else "clear")
         max_cols = max(1, term_cols - 1)
         sys.stdout.write(
-            "\n".join(line[:max_cols] for line in lines[: max(1, term_rows - 1)])
+            "\n".join(line[:max_cols] for line in clean_lines[: max(1, term_rows - 1)])
         )
         sys.stdout.flush()
 
@@ -571,9 +572,10 @@ def render_board_row(i):
         if val == " ":
             row_cells.append(CELL_EMPTY)
         elif val == ".":
-            row_cells.append(f"{BLOCK_COLORS['.']}{CELL_GHOST}{RESET_COLOR}")
+            color = BLOCK_COLORS.get(".", "") if ANSI_ENABLED else ""
+            row_cells.append(f"{color}{CELL_GHOST}{RESET_COLOR}" if color else CELL_GHOST)
         else:
-            color = BLOCK_COLORS.get(val, "")
+            color = BLOCK_COLORS.get(val, "") if ANSI_ENABLED else ""
             row_cells.append(f"{color}{CELL_BLOCK}{RESET_COLOR}" if color else CELL_BLOCK)
 
     return "│" + "".join(row_cells) + "│"
@@ -714,7 +716,8 @@ def slice_ansi(text, start, end=None):
             out.append(text[i])
         col += 1
         i += 1
-    out.append(RESET_COLOR)
+    if ANSI_ENABLED:
+        out.append(RESET_COLOR)
     return "".join(out)
 
 def make_panel(title, body_lines, width=UI_WIDTH, body_align="center", height=None):
