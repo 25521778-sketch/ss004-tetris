@@ -3,10 +3,9 @@
 Đồ án cuối kỳ môn Kỹ năng nghề nghiệp: xây dựng trò chơi **Tetris** chạy trên Windows Terminal bằng **Python** chỉ dùng thư viện chuẩn.
 
 ## Tính năng chính
-- **Gameplay chuẩn hóa:** 7 loại khối (`I, O, T, S, Z, J, L`) sinh theo cơ chế **7-Bag Randomizer**, xoay 2 chiều kèm **Wall-kick**, **Ghost Piece** (bóng mờ dự đoán vị trí rơi), **Next Block** và **Hold Piece** (`C`).
-- **Điều khiển mượt:** Giữ phím di chuyển ngang theo cơ chế **DAS/ARR** (`150 ms` / `35 ms`) qua Win32 API và **Lock Delay** (`500 ms`, tối đa 15 lần reset) khi chạm đáy.
-- **3 mức độ khó:** `EASY` (`0.8s`), `NORMAL` (`0.5s`), `HARD` (`0.2s`), tự động tăng tốc độ rơi theo số hàng đã xóa (giới hạn tối thiểu `0.08s/ô`).
-- **Giao diện & Theme:** Khung hiển thị cố định `66x26` dùng Alternate Screen Buffer chống cuộn/nháy màn hình, tự cảnh báo khi cửa sổ nhỏ và có chế độ fallback Win32 khi terminal không hỗ trợ ANSI. Hỗ trợ 4 bộ giao diện (**CLASSIC, NEON, PASTEL, RETRO**) đổi trực tiếp trên Menu.
+- **Gameplay chuẩn hóa:** 7 loại khối (`I, O, T, S, Z, J, L`) sinh theo cơ chế **7-Bag Randomizer**, xoay theo 2 chiều kèm **Wall-kick**, **Ghost Piece**, **Next Block** và **Hold Piece**.
+- **3 mức độ khó:** `EASY`, `NORMAL`, `HARD`, tự động tăng tốc độ rơi theo số hàng đã xóa.
+- **Giao diện & Theme:** Hỗ trợ 4 bộ giao diện (**CLASSIC, NEON, PASTEL, RETRO**) đổi trực tiếp trên Menu.
 - **Tính điểm & Bảng xếp hạng:** Tính điểm theo cấp độ, chuỗi Combo, Hard-drop và tự động lưu **Top 10 High Scores** vào `high_scores.json`.
 
 ## Yêu cầu & Cách chạy
@@ -15,7 +14,7 @@
 - **Terminal khuyến nghị:** Windows Terminal, PowerShell hoặc VS Code Terminal (kích thước tối thiểu `66x26` để hiển thị trọn khung và đủ màu ANSI).
 
 ```bash
-git clone [https://github.com/25521778-sketch/ss004-tetris.git](https://github.com/25521778-sketch/ss004-tetris.git)
+git clone https://github.com/25521778-sketch/ss004-tetris.git
 cd ss004-tetris
 python tetris.py
 ```
