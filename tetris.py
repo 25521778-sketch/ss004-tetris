@@ -355,7 +355,7 @@ class Block:
         shape = target_shape or self.shape
         return all(
             1 <= self.x + j + dx < W - 1
-            and self.y + i + dy < H - 1
+            and 1 <= self.y + i + dy < H - 1
             and board[self.y + i + dy][self.x + j + dx] == " "
             for i, row in enumerate(shape) for j, cell in enumerate(row) if cell != " "
         )
@@ -376,11 +376,15 @@ class Block:
         self._put(" ")
 
     def rotate(self, clockwise=True):
-        rotated = [list(row) for row in (zip(*self.shape[::-1]) if clockwise else zip(*self.shape[::-1]))]
-        if not clockwise:
+        if clockwise:
+            rotated = [list(row) for row in zip(*self.shape[::-1])]
+        else:
             rotated = [list(row) for row in zip(*self.shape)][::-1]
-        if self.can_move(0, 0, rotated):
-            self.shape = rotated
+        for dx in (0, -1, 1):
+            if self.can_move(dx, 0, rotated):
+                self.x += dx
+                self.shape = rotated
+                break
 
     def rotate_counterclockwise(self):
         self.rotate(False)
